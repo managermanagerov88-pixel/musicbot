@@ -8,23 +8,23 @@ from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 # ======================
 # НАСТРОЙКИ
 # ======================
-BOT_TOKEN = "ВСТАВЬ_ТОКЕН"
-AUDD_API_KEY = "ВСТАВЬ_AUDD_KEY"
-CHANNEL_USERNAME = "@YOUR_CHANNEL"  # <- сюда свой канал
+BOT_TOKEN = "8994533338:AAEouqVsEXkiRLViw2I1RucsEkKswUZP5RY"
+AUDD_API_KEY = "5eeedf20b79da84a763484f3358ad40b"
+CHANNEL_USERNAME = "@sp_rap"
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # ======================
-# ПРОСТАЯ ПАМЯТЬ (в RAM)
+# ПАМЯТЬ (пока временно)
 # ======================
-user_favorites = {}
-user_history = {}
+favorites = {}
+history = {}
 
 # ======================
 # ПРОВЕРКА ПОДПИСКИ
 # ======================
-async def is_subscribed(user_id):
+async def check_sub(user_id):
     try:
         member = await bot.get_chat_member(CHANNEL_USERNAME, user_id)
         return member.status in ["member", "administrator", "creator"]
@@ -37,9 +37,10 @@ async def is_subscribed(user_id):
 @dp.message_handler(commands=['start'])
 async def start(message: types.Message):
 
-    if not await is_subscribed(message.from_user.id):
+    if not await check_sub(message.from_user.id):
         await message.answer(
-            f"❌ Подпишись на канал {CHANNEL_USERNAME}, чтобы пользоваться ботом."
+            f"❌ Подпишись на канал {CHANNEL_USERNAME}\n"
+            "и нажми /start снова."
         )
         return
 
@@ -52,55 +53,50 @@ async def start(message: types.Message):
     )
 
 # ======================
-# КНОПКИ ССЫЛОК + ИЗБРАННОЕ
+# КНОПКИ
 # ======================
-def create_keyboard(user_id, artist, title):
-    query = f"{artist} {title}"
+def make_buttons(user_id, artist, title):
+    q = f"{artist} {title}"
 
-    keyboard = InlineKeyboardMarkup(row_width=1)
+    kb = InlineKeyboardMarkup(row_width=1)
 
-    keyboard.add(
-        InlineKeyboardButton("🎧 Spotify", url=f"https://open.spotify.com/search/{query}"),
-        InlineKeyboardButton("🎵 Яндекс Музыка", url=f"https://music.yandex.ru/search?text={query}"),
-        InlineKeyboardButton("🍎 Apple Music", url=f"https://music.apple.com/search?term={query}"),
-        InlineKeyboardButton("📖 Genius", url=f"https://genius.com/search?q={query}")
+    kb.add(
+        InlineKeyboardButton("🎧 Spotify", url=f"https://open.spotify.com/search/{q}"),
+        InlineKeyboardButton("🎵 Яндекс Музыка", url=f"https://music.yandex.ru/search?text={q}"),
+        InlineKeyboardButton("🍎 Apple Music", url=f"https://music.apple.com/search?term={q}"),
+        InlineKeyboardButton("📖 Genius", url=f"https://genius.com/search?q={q}")
     )
 
-    fav_key = f"{artist} - {title}"
-
-    keyboard.add(
-        InlineKeyboardButton(
-            "⭐ В избранное",
-            callback_data=f"fav|{fav_key}"
-        )
+    kb.add(
+        InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{artist} - {title}")
     )
 
-    return keyboard
+    return kb
 
 # ======================
-# CALLBACK (избранное)
+# ИЗБРАННОЕ
 # ======================
 @dp.callback_query_handler(lambda c: c.data.startswith("fav|"))
-async def add_fav(callback_query: types.CallbackQuery):
-    user_id = callback_query.from_user.id
-    song = callback_query.data.split("|")[1]
+async def fav(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    song = callback.data.split("|")[1]
 
-    user_favorites.setdefault(user_id, [])
-    user_favorites[user_id].append(song)
+    favorites.setdefault(user_id, [])
+    favorites[user_id].append(song)
 
-    await callback_query.answer("Добавлено в избранное ⭐")
+    await callback.answer("Добавлено в избранное ⭐")
 
 # ======================
-# РАСПОЗНАВАНИЕ
+# МУЗЫКА
 # ======================
 @dp.message_handler(content_types=['voice', 'audio', 'video_note'])
-async def handle_audio(message: types.Message):
+async def music(message: types.Message):
 
-    if not await is_subscribed(message.from_user.id):
+    if not await check_sub(message.from_user.id):
         await message.answer(f"❌ Подпишись на {CHANNEL_USERNAME}")
         return
 
-    await message.answer("🎧 Анализирую...")
+    await message.answer("🎧 Ищу трек...")
 
     try:
         if message.voice:
@@ -121,7 +117,7 @@ async def handle_audio(message: types.Message):
         r = requests.post("https://api.audd.io/", data=data, timeout=25)
         result = r.json()
 
-        print(result)
+        print("AUDD:", result)
 
         if result.get("result"):
             artist = result["result"]["artist"]
@@ -129,22 +125,21 @@ async def handle_audio(message: types.Message):
             image = result["result"].get("album_image")
 
             # история
-            user_history.setdefault(message.from_user.id, [])
-            user_history[message.from_user.id].append(f"{artist} - {title}")
-
-            keyboard = create_keyboard(message.from_user.id, artist, title)
+            history.setdefault(message.from_user.id, [])
+            history[message.from_user.id].append(f"{artist} - {title}")
 
             text = f"🎵 {artist} - {title}"
+            kb = make_buttons(message.from_user.id, artist, title)
 
             if image:
                 await bot.send_photo(
                     message.chat.id,
                     photo=image,
                     caption=text,
-                    reply_markup=keyboard
+                    reply_markup=kb
                 )
             else:
-                await message.answer(text, reply_markup=keyboard)
+                await message.answer(text, reply_markup=kb)
 
         else:
             await message.answer("❌ Не удалось распознать трек")
