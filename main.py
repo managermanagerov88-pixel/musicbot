@@ -1,5 +1,31 @@
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import logging
 import requests
+def create_links(artist, title):
+    query = f"{artist} {title}"
+
+    keyboard = InlineKeyboardMarkup(row_width=1)
+
+    keyboard.add(
+        InlineKeyboardButton(
+            "🎧 Spotify",
+            url=f"https://open.spotify.com/search/{query}"
+        ),
+        InlineKeyboardButton(
+            "🎵 Яндекс Музыка",
+            url=f"https://music.yandex.ru/search?text={query}"
+        ),
+        InlineKeyboardButton(
+            "🍎 Apple Music",
+            url=f"https://music.apple.com/search?term={query}"
+        ),
+        InlineKeyboardButton(
+            "📖 Genius Lyrics",
+            url=f"https://genius.com/search?q={query}"
+        )
+    )
+
+    return keyboard
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
 
@@ -42,7 +68,12 @@ async def handle_audio(message: types.Message):
         elif message.video_note:
             file_id = message.video_note.file_id
         else:
-            await message.answer("❌ Неизвестный формат")
+            keyboard = create_links(artist, song)
+
+await message.answer(
+    f"🎵 {artist} - {song}",
+    reply_markup=keyboard
+)
             return
 
         # получаем файл из Telegram
