@@ -191,7 +191,11 @@ async def music(message: types.Message):
         if result.get("result"):
             artist = result["result"]["artist"]
             title = result["result"]["title"]
-            image = result["result"].get("album_image")
+            image = (
+    result["result"].get("album_image")
+    or result["result"].get("image")
+    or (result["result"].get("spotify", {}).get("album", {}).get("images", [{}])[0].get("url") if result["result"].get("spotify") else None)
+)
 
             history.setdefault(message.from_user.id, [])
             history[message.from_user.id].append(f"{artist} - {title}")
