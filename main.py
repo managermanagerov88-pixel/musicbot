@@ -45,6 +45,6 @@ async def handle_audio(message: types.Message):
         print(e)
 
 
-if name == "__main__":
+if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     executor.start_polling(dp)
