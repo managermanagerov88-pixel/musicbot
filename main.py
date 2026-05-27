@@ -17,24 +17,28 @@ if __name__ == "__main__":
     AUDD_API_KEY = "5eeedf20b79da84a763484f3358ad40b"
     import requests
 
-@dp.message_handler(content_types=['voice', 'audio'])
-async def handle_audio(message: types.Message):
-    file = await bot.get_file(message.voice.file_id if message.voice else message.audio.file_id)
-    file_path = file.file_path
-    file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+@dp.message_handler(content_types=['voice'])
+async def handle_voice(message: types.Message):
+    await message.answer("🎧 Получил голосовое, обрабатываю...")
+
+    file = await bot.get_file(message.voice.file_id)
+    file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
 
     data = {
-        'api_token': AUDD_API_KEY,
-        'url': file_url
+        "api_token": AUDD_API_KEY,
+        "url": file_url
     }
 
-    r = requests.post("https://api.audd.io/", data=data)
-    result = r.json()
+    try:
+        r = requests.post("https://api.audd.io/", data=data, timeout=20)
+        result = r.json()
 
-    if result.get("result"):
-        song = result["result"]["title"]
-        artist = result["result"]["artist"]
-
-        await message.answer(f"🎵 {artist} - {song}")
-    else:
-        await message.answer("❌ Не удалось распознать трек")
+        if result.get("result"):
+            song = result["result"]["title"]
+            artist = result["result"]["artist"]
+            await message.answer(f"🎵 {artist} - {song}")
+        else:
+            await message.answer("❌ Не распознал трек")
+    except Exception as e:
+        await message.answer("❌ Ошибка обработки аудио")
+        print(e)
