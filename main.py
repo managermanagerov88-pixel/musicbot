@@ -3,7 +3,7 @@ import requests
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
 
 # ======================
 # НАСТРОЙКИ
@@ -19,7 +19,7 @@ favorites = {}
 history = {}
 
 # ======================
-# ПРОВЕРКА ПОДПИСКИ
+# ПОДПИСКА
 # ======================
 async def check_sub(user_id):
     try:
@@ -29,9 +29,21 @@ async def check_sub(user_id):
         return False
 
 # ======================
-# КНОПКИ
+# ГЛАВНОЕ МЕНЮ (КРАСИВОЕ)
 # ======================
-def make_buttons(artist, title):
+def main_menu():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+
+    kb.add("🎵 Распознать музыку")
+    kb.add("⭐ Избранное", "📜 История")
+    kb.add("ℹ️ Помощь")
+
+    return kb
+
+# ======================
+# КНОПКИ ССЫЛОК
+# ======================
+def make_links(artist, title):
     q = f"{artist} {title}"
 
     kb = InlineKeyboardMarkup(row_width=1)
@@ -46,7 +58,7 @@ def make_buttons(artist, title):
     return kb
 
 # ======================
-# 🔥 100% РАБОЧАЯ ОБЛОЖКА (iTunes)
+# ОБЛОЖКА (iTunes — стабильно)
 # ======================
 def get_cover(artist, title):
     try:
@@ -67,8 +79,7 @@ def get_cover(artist, title):
 
         return None
 
-    except Exception as e:
-        print("cover error:", e)
+    except:
         return None
 
 # ======================
@@ -78,10 +89,76 @@ def get_cover(artist, title):
 async def start(message: types.Message):
 
     if not await check_sub(message.from_user.id):
-        await message.answer(f"❌ Подпишитесь на {CHANNEL_USERNAME}")
+        await message.answer(
+            f"❌ Подпишитесь на {CHANNEL_USERNAME}\n\n"
+            "После этого нажмите /start"
+        )
         return
 
-    await message.answer("🎵 Отправь голосовое или кружок")
+    await message.answer(
+        "🎵 <b>Добро пожаловать!</b>\n\n"
+        "Как пользоваться:\n"
+        "1️⃣ Нажми «🎵 Распознать музыку»\n"
+        "2️⃣ Отправь голосовое или кружок\n"
+        "3️⃣ Получи название + ссылки\n\n"
+        "⭐ Можно добавлять в избранное",
+        parse_mode="HTML",
+        reply_markup=main_menu()
+    )
+
+# ======================
+# КНОПКИ МЕНЮ (ВАЖНО - ФИКС)
+# ======================
+@dp.message_handler(lambda m: m.text == "🎵 Распознать музыку")
+async def ask_music(message: types.Message):
+    await message.answer("🎧 Отправь голосовое, кружок или аудио")
+
+@dp.message_handler(lambda m: m.text == "⭐ Избранное")
+async def show_favorites(message: types.Message):
+    fav = favorites.get(message.from_user.id, [])
+
+    if not fav:
+        await message.answer("⭐ Избранное пустое")
+        return
+
+    text = "⭐ <b>Избранное:</b>\n\n" + "\n".join(fav)
+    await message.answer(text, parse_mode="HTML")
+
+@dp.message_handler(lambda m: m.text == "📜 История")
+async def show_history(message: types.Message):
+    hist = history.get(message.from_user.id, [])
+
+    if not hist:
+        await message.answer("📜 История пуста")
+        return
+
+    text = "📜 <b>Последние треки:</b>\n\n" + "\n".join(hist[-10:])
+    await message.answer(text, parse_mode="HTML")
+
+@dp.message_handler(lambda m: m.text == "ℹ️ Помощь")
+async def help_cmd(message: types.Message):
+    await message.answer(
+        "ℹ️ <b>Как пользоваться ботом:</b>\n\n"
+        "🎵 Нажмите «Распознать музыку»\n"
+        "🎤 Отправьте голосовое или кружок\n"
+        "🎧 Получите название трека\n\n"
+        "⭐ Добавляйте в избранное\n"
+        "📜 Смотрите историю",
+        parse_mode="HTML"
+    )
+
+# ======================
+# ИЗБРАННОЕ (INLINE)
+# ======================
+@dp.callback_query_handler(lambda c: c.data.startswith("fav|"))
+async def fav(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    song = callback.data.split("|")[1]
+
+    favorites.setdefault(user_id, [])
+    favorites[user_id].append(song)
+
+    await callback.answer("Добавлено ⭐")
 
 # ======================
 # РАСПОЗНАВАНИЕ
@@ -96,7 +173,6 @@ async def music(message: types.Message):
     await message.answer("🎧 Распознаю...")
 
     try:
-        # файл
         if message.voice:
             file_id = message.voice.file_id
         elif message.audio:
@@ -107,7 +183,6 @@ async def music(message: types.Message):
         file = await bot.get_file(file_id)
         file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
 
-        # AudD запрос
         data = {
             "api_token": AUDD_API_KEY,
             "url": file_url
@@ -116,8 +191,6 @@ async def music(message: types.Message):
         r = requests.post("https://api.audd.io/", data=data, timeout=25)
         result = r.json()
 
-        print(result)
-
         if result.get("result"):
 
             artist = result["result"]["artist"]
@@ -125,10 +198,8 @@ async def music(message: types.Message):
 
             text = f"🎵 {artist} - {title}"
 
-            # 🔥 ОБЛОЖКА (100% РАБОТАЕТ)
             image = get_cover(artist, title)
-
-            kb = make_buttons(artist, title)
+            kb = make_links(artist, title)
 
             history.setdefault(message.from_user.id, [])
             history[message.from_user.id].append(text)
@@ -138,16 +209,17 @@ async def music(message: types.Message):
                     message.chat.id,
                     photo=image,
                     caption=text,
-                    reply_markup=kb
+                    reply_markup=kb,
+                    parse_mode="HTML"
                 )
             else:
                 await message.answer(text, reply_markup=kb)
 
         else:
-            await message.answer("❌ Не найдено")
+            await message.answer("❌ Не удалось распознать")
 
     except Exception as e:
-        print("ERROR:", e)
+        print(e)
         await message.answer("❌ Ошибка обработки")
 
 # ======================
