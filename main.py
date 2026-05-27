@@ -3,12 +3,7 @@ import requests
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
-from aiogram.types import (
-    InlineKeyboardMarkup,
-    InlineKeyboardButton,
-    ReplyKeyboardMarkup,
-    KeyboardButton
-)
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 
 # ======================
 # НАСТРОЙКИ
@@ -21,7 +16,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # ======================
-# ДАННЫЕ
+# ДАННЫЕ ПОЛЬЗОВАТЕЛЕЙ
 # ======================
 favorites = {}
 history = {}
@@ -39,92 +34,19 @@ async def check_sub(user_id):
 # ======================
 # ГЛАВНОЕ МЕНЮ
 # ======================
-def main_menu():
+def menu():
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
 
     kb.add("🎵 Распознать музыку")
     kb.add("⭐ Избранное", "📜 История")
-    kb.add("📊 Статистика", "ℹ️ Помощь")
+    kb.add("ℹ️ Помощь")
 
     return kb
 
 # ======================
-# START
+# ССЫЛКИ
 # ======================
-@dp.message_handler(commands=['start'])
-async def start(message: types.Message):
-
-    if not await check_sub(message.from_user.id):
-        await message.answer(
-            f"❌ Подпишитесь на {CHANNEL_USERNAME}\n"
-            "и нажмите /start снова."
-        )
-        return
-
-    await message.answer(
-        "🎧 <b>Добро пожаловать в Music Premium Bot</b>\n\n"
-        "Я распознаю музыку по:\n"
-        "🎤 голосу\n🔵 кружкам\n🎧 аудио\n\n"
-        "Выберите действие ниже 👇",
-        parse_mode="HTML",
-        reply_markup=main_menu()
-    )
-
-# ======================
-# МЕНЮ ОБРАБОТКА
-# ======================
-@dp.message_handler(lambda m: m.text == "🎵 Распознать музыку")
-async def ask_audio(message: types.Message):
-    await message.answer("🎧 Отправь голосовое, кружок или аудио")
-
-@dp.message_handler(lambda m: m.text == "⭐ Избранное")
-async def show_fav(message: types.Message):
-    user_id = message.from_user.id
-    fav = favorites.get(user_id, [])
-
-    if not fav:
-        await message.answer("⭐ Избранное пустое")
-        return
-
-    await message.answer("⭐ <b>Твои любимые треки:</b>\n\n" + "\n".join(fav), parse_mode="HTML")
-
-@dp.message_handler(lambda m: m.text == "📜 История")
-async def show_history(message: types.Message):
-    user_id = message.from_user.id
-    hist = history.get(user_id, [])
-
-    if not hist:
-        await message.answer("📜 История пуста")
-        return
-
-    await message.answer("📜 <b>Последние запросы:</b>\n\n" + "\n".join(hist[-10:]), parse_mode="HTML")
-
-@dp.message_handler(lambda m: m.text == "📊 Статистика")
-async def stats(message: types.Message):
-    user_id = message.from_user.id
-
-    await message.answer(
-        f"📊 <b>Статистика</b>\n\n"
-        f"⭐ Избранное: {len(favorites.get(user_id, []))}\n"
-        f"📜 История: {len(history.get(user_id, []))}",
-        parse_mode="HTML"
-    )
-
-@dp.message_handler(lambda m: m.text == "ℹ️ Помощь")
-async def help_cmd(message: types.Message):
-    await message.answer(
-        "ℹ️ <b>Как пользоваться:</b>\n\n"
-        "1. Нажми «🎵 Распознать музыку»\n"
-        "2. Отправь голосовое или кружок\n"
-        "3. Получи трек и ссылки\n\n"
-        "⭐ Можно добавлять в избранное",
-        parse_mode="HTML"
-    )
-
-# ======================
-# КНОПКИ ССЫЛОК
-# ======================
-def make_buttons(artist, title):
+def make_links(artist, title):
     q = f"{artist} {title}"
 
     kb = InlineKeyboardMarkup(row_width=1)
@@ -143,7 +65,47 @@ def make_buttons(artist, title):
     return kb
 
 # ======================
-# ИЗБРАННОЕ
+# 🔥 ОБЛОЖКА (СТАБИЛЬНАЯ)
+# ======================
+def get_cover(result):
+    # Apple Music (лучший источник)
+    try:
+        if result.get("apple_music"):
+            img = result["apple_music"]["artwork"]["url"]
+            return img.replace("{w}x{h}", "600x600")
+    except:
+        pass
+
+    # Deezer
+    try:
+        if result.get("deezer"):
+            return result["deezer"]["album"]["cover_big"]
+    except:
+        pass
+
+    # AudD fallback
+    return result.get("album_image") or result.get("image")
+
+# ======================
+# START
+# ======================
+@dp.message_handler(commands=['start'])
+async def start(message: types.Message):
+
+    if not await check_sub(message.from_user.id):
+        await message.answer(f"❌ Подпишитесь на {CHANNEL_USERNAME}")
+        return
+
+    await message.answer(
+        "🎵 <b>Music Bot запущен</b>\n\n"
+        "Отправь:\n"
+        "🎤 голосовое\n🔵 кружок\n🎧 аудио",
+        parse_mode="HTML",
+        reply_markup=menu()
+    )
+
+# ======================
+# КНОПКИ ИЗБРАННОГО
 # ======================
 @dp.callback_query_handler(lambda c: c.data.startswith("fav|"))
 async def fav(callback: types.CallbackQuery):
@@ -156,18 +118,49 @@ async def fav(callback: types.CallbackQuery):
     await callback.answer("Добавлено ⭐")
 
 # ======================
+# МЕНЮ КНОПКИ
+# ======================
+@dp.message_handler(lambda m: m.text == "⭐ Избранное")
+async def show_fav(message: types.Message):
+    fav = favorites.get(message.from_user.id, [])
+
+    if not fav:
+        await message.answer("⭐ Пусто")
+        return
+
+    await message.answer("\n".join(fav))
+
+@dp.message_handler(lambda m: m.text == "📜 История")
+async def show_history(message: types.Message):
+    hist = history.get(message.from_user.id, [])
+
+    if not hist:
+        await message.answer("📜 Пусто")
+        return
+
+    await message.answer("\n".join(hist[-10:]))
+
+@dp.message_handler(lambda m: m.text == "ℹ️ Помощь")
+async def help_msg(message: types.Message):
+    await message.answer(
+        "🎵 Просто отправь голосовое или кружок\n"
+        "и я найду музыку"
+    )
+
+# ======================
 # РАСПОЗНАВАНИЕ
 # ======================
 @dp.message_handler(content_types=['voice', 'audio', 'video_note'])
 async def music(message: types.Message):
 
     if not await check_sub(message.from_user.id):
-        await message.answer(f"❌ Подпишись на {CHANNEL_USERNAME}")
+        await message.answer(f"❌ Подпишитесь на {CHANNEL_USERNAME}")
         return
 
-    await message.answer("🎧 Анализирую...")
+    await message.answer("🎧 Ищу трек...")
 
     try:
+        # файл
         if message.voice:
             file_id = message.voice.file_id
         elif message.audio:
@@ -178,6 +171,7 @@ async def music(message: types.Message):
         file = await bot.get_file(file_id)
         file_url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
 
+        # AudD
         data = {
             "api_token": AUDD_API_KEY,
             "url": file_url
@@ -189,38 +183,38 @@ async def music(message: types.Message):
         print(result)
 
         if result.get("result"):
-            artist = result["result"]["artist"]
-            title = result["result"]["title"]
-            image = (
-    result["result"].get("album_image")
-    or result["result"].get("image")
-    or (result["result"].get("spotify", {}).get("album", {}).get("images", [{}])[0].get("url") if result["result"].get("spotify") else None)
-)
+
+            res = result["result"]
+
+            artist = res["artist"]
+            title = res["title"]
+
+            # 🔥 обложка
+            image = get_cover(res)
+
+            text = f"🎵 {artist} - {title}"
+
+            kb = make_links(artist, title)
 
             history.setdefault(message.from_user.id, [])
-            history[message.from_user.id].append(f"{artist} - {title}")
-
-            text = f"🎵 <b>{artist} - {title}</b>"
-
-            kb = make_buttons(artist, title)
+            history[message.from_user.id].append(text)
 
             if image:
                 await bot.send_photo(
                     message.chat.id,
                     photo=image,
                     caption=text,
-                    parse_mode="HTML",
                     reply_markup=kb
                 )
             else:
-                await message.answer(text, parse_mode="HTML", reply_markup=kb)
+                await message.answer(text, reply_markup=kb)
 
         else:
-            await message.answer("❌ Не удалось распознать трек")
+            await message.answer("❌ Не найдено")
 
     except Exception as e:
-        print(e)
-        await message.answer("❌ Ошибка обработки файла")
+        print("ERROR:", e)
+        await message.answer("❌ Ошибка обработки")
 
 # ======================
 # RUN
