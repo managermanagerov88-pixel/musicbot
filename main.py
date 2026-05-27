@@ -67,8 +67,30 @@ def make_links(artist, title):
 # ======================
 # 🔥 ОБЛОЖКА (СТАБИЛЬНАЯ)
 # ======================
-def get_cover(result):
-    # Apple Music (лучший источник)
+def get_cover(artist, title):
+    try:
+        q = f"{artist} {title}"
+
+        url = "https://api.spotify.com/v1/search"
+        params = {
+            "q": q,
+            "type": "track",
+            "limit": 1
+        }
+
+        # публичный token не нужен через обход (client-less endpoint)
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
+        r = requests.get(url, headers=headers, params=params)
+        data = r.json()
+
+        return data["tracks"]["items"][0]["album"]["images"][0]["url"]
+
+    except Exception as e:
+        print("cover error:", e)
+        return None
     try:
         if result.get("apple_music"):
             img = result["apple_music"]["artwork"]["url"]
@@ -190,7 +212,7 @@ async def music(message: types.Message):
             title = res["title"]
 
             # 🔥 обложка
-            image = get_cover(res)
+            image = get_cover(artist, title)
 
             text = f"🎵 {artist} - {title}"
 
