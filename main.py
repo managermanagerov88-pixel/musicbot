@@ -177,7 +177,7 @@ async def help_handler(message: types.Message):
 
 📌 Примеры:
 
-• отправь кружок из TikTok
+• отправь кружок
 • отправь видео
 • отправь голосовое
 • отправь строчку песни
@@ -209,25 +209,10 @@ def get_cover(artist, title):
 
     try:
 
-        query = f"{artist} {title}"
-
         artist_l = artist.lower().strip()
         title_l = title.lower().strip()
 
-        # =====================================
-        # 1. DEEZER (основной источник)
-        # =====================================
-
-        dz = requests.get(
-            "https://api.deezer.com/search",
-            params={"q": query},
-            timeout=15
-        ).json()
-
-        data = dz.get("data", [])
-
-        best_cover = None
-        best_score = -1
+        query = f"{artist} {title}"
 
         banned = [
             "remix",
@@ -241,10 +226,25 @@ def get_cover(artist, title):
             "cover"
         ]
 
+        # =====================================
+        # 1. DEEZER (основной источник)
+        # =====================================
+
+        dz = requests.get(
+            "https://api.deezer.com/search",
+            params={"q": query},
+            timeout=15
+        ).json()
+
+        data = dz.get("data", [])
+
+        best = None
+        best_score = -1
+
         for item in data:
 
-            t = item.get("title", "").lower()
-            a = item.get("artist", {}).get("name", "").lower()
+            title_d = item.get("title", "").lower()
+            artist_d = item.get("artist", {}).get("name", "").lower()
 
             album = item.get("album", {})
             cover = album.get("cover_xl")
@@ -253,27 +253,31 @@ def get_cover(artist, title):
                 continue
 
             # фильтр мусора
-            if any(b in t for b in banned):
+            if any(b in title_d for b in banned):
                 continue
 
             score = 0
 
-            if artist_l == a:
+            if artist_l == artist_d:
                 score += 100
-            elif artist_l in a:
+            elif artist_l in artist_d:
                 score += 60
 
-            if title_l == t:
+            if title_l == title_d:
                 score += 100
-            elif title_l in t:
+            elif title_l in title_d:
                 score += 60
+
+            # бонус за нормальный релиз
+            if "feat" not in title_d:
+                score += 5
 
             if score > best_score:
                 best_score = score
-                best_cover = cover
+                best = cover
 
-        if best_cover:
-            return best_cover
+        if best:
+            return best
 
         # =====================================
         # 2. ITUNES (fallback)
@@ -291,40 +295,40 @@ def get_cover(artist, title):
 
         results = r.get("results", [])
 
-        best_cover = None
+        best = None
         best_score = -1
 
         for item in results:
 
-            a = item.get("artistName", "").lower()
-            t = item.get("trackName", "").lower()
+            title_i = item.get("trackName", "").lower()
+            artist_i = item.get("artistName", "").lower()
 
-            if any(b in t for b in banned):
+            if any(b in title_i for b in banned):
                 continue
 
             score = 0
 
-            if artist_l == a:
+            if artist_l == artist_i:
                 score += 100
-            elif artist_l in a:
+            elif artist_l in artist_i:
                 score += 50
 
-            if title_l == t:
+            if title_l == title_i:
                 score += 100
-            elif title_l in t:
+            elif title_l in title_i:
                 score += 50
 
             if score > best_score:
                 best_score = score
-                best_cover = item.get("artworkUrl100")
+                best = item.get("artworkUrl100")
 
-        if best_cover:
-            return best_cover.replace("100x100", "600x600")
+        if best:
+            return best.replace("100x100", "600x600")
 
         return None
 
     except Exception as e:
-        print(e)
+        print("cover error:", e)
         return None
 
     try:
