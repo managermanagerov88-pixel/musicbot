@@ -662,10 +662,46 @@ async def text_handler(message: types.Message):
     if message.text.startswith("/"):
         return
 
-    wait = await message.answer(
-        "🔎 Ищу трек..."
-    )
+    wait = await message.answer("🔎 Ищу трек...")
 
+    try:
+
+        r = requests.get(
+            "https://itunes.apple.com/search",
+            params={
+                "term": message.text,
+                "entity": "song",
+                "limit": 5
+            },
+            timeout=15
+        ).json()
+
+        results = r.get("results", [])
+
+        if not results:
+
+            await wait.edit_text("❌ Трек не найден")
+            return
+
+        best = results[0]
+
+        artist = best.get("artistName", "Unknown")
+        title = best.get("trackName", "Unknown")
+
+        await wait.delete()
+
+        await send_result(
+            message,
+            artist,
+            title,
+            "text"
+        )
+
+    except Exception as e:
+
+        print(e)
+
+        await wait.edit_text("❌ Ошибка поиска")
     try:
 
         r = requests.get(
