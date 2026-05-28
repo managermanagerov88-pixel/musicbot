@@ -58,6 +58,15 @@ def add_user(uid):
     cur.execute("INSERT OR IGNORE INTO users VALUES (?)", (uid,))
     conn.commit()
 
+# ✅ ВАЖНО: ПРАВИЛЬНАЯ ПРОВЕРКА ПОДПИСКИ
+async def is_subscribed(user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(CHANNEL, user_id)
+        return member.status in ["member", "administrator", "creator"]
+    except Exception as e:
+        print("SUB CHECK ERROR:", e)
+        return False
+
 def recognize(url):
     try:
         r = requests.post(
@@ -83,13 +92,6 @@ def cover(artist, title):
         pass
     return None
 
-def check_sub(user_id):
-    try:
-        member = bot.get_chat_member(CHANNEL, user_id)
-        return member.status in ["member", "administrator", "creator"]
-    except:
-        return False
-
 def build_links(artist, title):
     q = f"{artist} {title}"
     return {
@@ -107,42 +109,46 @@ async def start(m: types.Message):
 
     add_user(m.from_user.id)
 
-    if not check_sub(m.from_user.id):
+    if not await is_subscribed(m.from_user.id):
         return await m.answer(
-            "🚫 Доступ только после подписки",
+            "🚫 Доступ только после подписки на канал",
             reply_markup=sub_kb
         )
 
-    await m.answer(
-        "🎵 Music Finder Pro\n\nВыбери действие:",
-        reply_markup=menu
-    )
+    await m.answer("🎵 Music Finder Pro\n\nВыбери действие:", reply_markup=menu)
 
 # =====================
-# CHECK SUB
+# CHECK SUB BUTTON
 # =====================
 
 @dp.callback_query_handler(lambda c: c.data == "check_sub")
 async def check(c: types.CallbackQuery):
 
-    if check_sub(c.from_user.id):
-        await c.message.edit_text(
-            "✅ доступ открыт!",
-            reply_markup=None
-        )
+    if await is_subscribed(c.from_user.id):
+        await c.message.edit_text("✅ доступ открыт!")
         await bot.send_message(c.from_user.id, "🎵 Меню:", reply_markup=menu)
     else:
-        await c.answer("❌ ты не подписан", show_alert=True)
+        await c.answer("❌ подписка не найдена", show_alert=True)
 
 # =====================
-# MEDIA (VOICE/AUDIO/VIDEO NOTE)
+# BLOCK IF NOT SUBBED (ВАЖНО)
+# =====================
+
+async def guard(user_id, message: types.Message):
+    if not await is_subscribed(user_id):
+        await message.answer("🚫 сначала подпишись", reply_markup=sub_kb)
+        return False
+    return True
+
+# =====================
+# MEDIA
 # =====================
 
 @dp.message_handler(content_types=["voice", "audio", "video_note"])
 async def media(m: types.Message):
 
-    if not check_sub(m.from_user.id):
-        return await m.answer("🚫 подпишись сначала", reply_markup=sub_kb)
+    if not await guard(m.from_user.id, m):
+        return
 
     msg = await m.answer("🎧 анализ...")
 
@@ -171,59 +177,19 @@ async def media(m: types.Message):
     img = cover(artist, title)
     links = build_links(artist, title)
 
-    kb = InlineKeyboardMarkup(row_width=2)
+    kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("🎧 Spotify", url=links["spotify"]),
         InlineKeyboardButton("▶️ YouTube", url=links["youtube"])
     )
     kb.add(
-        InlineKeyboardButton("🎵 Яндекс", url=links["yandex"]),
-        InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}")
+        InlineKeyboardButton("🎵 Яндекс", url=links["yandex"])
     )
 
     if img:
         await bot.send_photo(m.chat.id, img, caption=f"🎵 {song}", reply_markup=kb)
     else:
         await msg.edit_text(f"🎵 {song}", reply_markup=kb)
-
-# =====================
-# VIDEO SEARCH
-# =====================
-
-@dp.message_handler(content_types=["video"])
-async def video(m: types.Message):
-
-    if not check_sub(m.from_user.id):
-        return await m.answer("🚫 подпишись сначала", reply_markup=sub_kb)
-
-    msg = await m.answer("📹 анализ видео...")
-
-    file = await bot.get_file(m.video.file_id)
-    url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
-
-    res = recognize(url)
-
-    if not res or not res.get("result"):
-        return await msg.edit_text("❌ не найдено")
-
-    artist = res["result"]["artist"]
-    title = res["result"]["title"]
-
-    song = f"{artist} - {title}"
-
-    cur.execute("INSERT INTO history VALUES (?,?)", (m.from_user.id, song))
-    conn.commit()
-
-    img = cover(artist, title)
-    links = build_links(artist, title)
-
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}"))
-
-    if img:
-        await bot.send_photo(m.chat.id, img, caption=song, reply_markup=kb)
-    else:
-        await msg.edit_text(song, reply_markup=kb)
 
 # =====================
 # TEXT SEARCH
@@ -235,8 +201,8 @@ async def text(m: types.Message):
     if m.text.startswith("/"):
         return
 
-    if not check_sub(m.from_user.id):
-        return await m.answer("🚫 подпишись сначала", reply_markup=sub_kb)
+    if not await guard(m.from_user.id, m):
+        return
 
     msg = await m.answer("🔎 ищу...")
 
@@ -260,36 +226,54 @@ async def text(m: types.Message):
     img = cover(artist, title)
     links = build_links(artist, title)
 
-    kb = InlineKeyboardMarkup(row_width=2)
+    kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("🎧 Spotify", url=links["spotify"]),
         InlineKeyboardButton("▶️ YouTube", url=links["youtube"])
     )
-    kb.add(
-        InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}")
-    )
 
     if img:
-        await bot.send_photo(m.chat.id, img, caption=f"🎵 {song}", reply_markup=kb)
+        await bot.send_photo(m.chat.id, img, caption=song, reply_markup=kb)
     else:
-        await msg.edit_text(f"🎵 {song}", reply_markup=kb)
+        await msg.edit_text(song, reply_markup=kb)
 
 # =====================
-# FAVORITES
+# VIDEO
 # =====================
 
-@dp.callback_query_handler(lambda c: c.data.startswith("fav|"))
-async def fav(c: types.CallbackQuery):
+@dp.message_handler(content_types=["video"])
+async def video(m: types.Message):
 
-    song = c.data.split("|")[1]
+    if not await guard(m.from_user.id, m):
+        return
 
-    cur.execute("INSERT INTO favs VALUES (?,?)", (c.from_user.id, song))
+    msg = await m.answer("📹 анализ...")
+
+    file = await bot.get_file(m.video.file_id)
+    url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+
+    res = recognize(url)
+
+    if not res or not res.get("result"):
+        return await msg.edit_text("❌ не найдено")
+
+    artist = res["result"]["artist"]
+    title = res["result"]["title"]
+
+    song = f"{artist} - {title}"
+
+    cur.execute("INSERT INTO history VALUES (?,?)", (m.from_user.id, song))
     conn.commit()
 
-    await c.answer("⭐ добавлено")
+    img = cover(artist, title)
+
+    if img:
+        await bot.send_photo(m.chat.id, img, caption=song)
+    else:
+        await msg.edit_text(song)
 
 # =====================
-# MENU
+# BUTTONS
 # =====================
 
 @dp.message_handler(lambda m: m.text == "📜 История")
@@ -298,10 +282,7 @@ async def history(m: types.Message):
     cur.execute("SELECT song FROM history WHERE user_id=?", (m.from_user.id,))
     rows = cur.fetchall()
 
-    if not rows:
-        return await m.answer("📜 пусто")
-
-    await m.answer("\n".join([r[0] for r in rows[-10:]]))
+    await m.answer("\n".join([r[0] for r in rows[-10:]]) if rows else "пусто")
 
 @dp.message_handler(lambda m: m.text == "⭐ Избранное")
 async def favs(m: types.Message):
@@ -309,18 +290,15 @@ async def favs(m: types.Message):
     cur.execute("SELECT song FROM favs WHERE user_id=?", (m.from_user.id,))
     rows = cur.fetchall()
 
-    if not rows:
-        return await m.answer("⭐ пусто")
-
-    await m.answer("\n".join([r[0] for r in rows[-10:]]))
+    await m.answer("\n".join([r[0] for r in rows[-10:]]) if rows else "пусто")
 
 @dp.message_handler(lambda m: m.text == "ℹ️ Помощь")
 async def help(m: types.Message):
     await m.answer(
         "🎵 Бот:\n"
-        "• голос → трек\n"
-        "• видео → трек\n"
-        "• текст → поиск\n"
+        "🎧 аудио → трек\n"
+        "📹 видео → трек\n"
+        "🔎 текст → поиск\n"
         "⭐ избранное\n📜 история"
     )
 
