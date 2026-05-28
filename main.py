@@ -1,8 +1,6 @@
 import logging
 import sqlite3
 import requests
-import os
-import subprocess
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.utils import executor
@@ -39,13 +37,18 @@ cur.execute("CREATE TABLE IF NOT EXISTS favs (user_id INTEGER, song TEXT)")
 conn.commit()
 
 # =====================
-# MENU UI
+# UI
 # =====================
 
 menu = ReplyKeyboardMarkup(resize_keyboard=True)
 menu.row("🎧 Распознать", "🔎 Поиск текста")
-menu.row("📎 Поиск по ссылке", "⭐ Избранное")
-menu.row("📜 История", "ℹ️ Помощь")
+menu.row("📹 Поиск по видео")
+menu.row("⭐ Избранное", "📜 История")
+menu.row("ℹ️ Помощь")
+
+sub_kb = InlineKeyboardMarkup()
+sub_kb.add(InlineKeyboardButton("📢 Подписаться", url=f"https://t.me/{CHANNEL.replace('@','')}"))
+sub_kb.add(InlineKeyboardButton("🔄 Проверить", callback_data="check_sub"))
 
 # =====================
 # HELPERS
@@ -55,21 +58,16 @@ def add_user(uid):
     cur.execute("INSERT OR IGNORE INTO users VALUES (?)", (uid,))
     conn.commit()
 
-def stats():
-    cur.execute("SELECT COUNT(*) FROM users")
-    u = cur.fetchone()[0]
-
-    cur.execute("SELECT COUNT(*) FROM history")
-    h = cur.fetchone()[0]
-
-    cur.execute("SELECT COUNT(*) FROM favs")
-    f = cur.fetchone()[0]
-
-    return u, h, f
-
-# =====================
-# COVER
-# =====================
+def recognize(url):
+    try:
+        r = requests.post(
+            "https://api.audd.io/",
+            data={"api_token": AUDD_API_KEY, "url": url},
+            timeout=30
+        )
+        return r.json()
+    except:
+        return None
 
 def cover(artist, title):
     try:
@@ -85,41 +83,20 @@ def cover(artist, title):
         pass
     return None
 
-# =====================
-# AUDD (file/url)
-# =====================
-
-def recognize_url(url):
+def check_sub(user_id):
     try:
-        r = requests.post(
-            "https://api.audd.io/",
-            data={"api_token": AUDD_API_KEY, "url": url},
-            timeout=30
-        )
-        return r.json()
+        member = bot.get_chat_member(CHANNEL, user_id)
+        return member.status in ["member", "administrator", "creator"]
     except:
-        return None
+        return False
 
-# =====================
-# DOWNLOAD VIDEO (IMPORTANT)
-# =====================
-
-def download_audio(url):
-    out = "audio.mp3"
-
-    cmd = [
-        "yt-dlp",
-        "-x",
-        "--audio-format", "mp3",
-        "-o", out,
-        url
-    ]
-
-    subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-    if os.path.exists(out):
-        return out
-    return None
+def build_links(artist, title):
+    q = f"{artist} {title}"
+    return {
+        "spotify": f"https://open.spotify.com/search/{q.replace(' ', '%20')}",
+        "youtube": f"https://www.youtube.com/results?search_query={q.replace(' ', '+')}",
+        "yandex": f"https://music.yandex.ru/search?text={q.replace(' ', '%20')}"
+    }
 
 # =====================
 # START
@@ -127,32 +104,58 @@ def download_audio(url):
 
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
+
     add_user(m.from_user.id)
+
+    if not check_sub(m.from_user.id):
+        return await m.answer(
+            "🚫 Доступ только после подписки",
+            reply_markup=sub_kb
+        )
+
     await m.answer(
         "🎵 Music Finder Pro\n\nВыбери действие:",
         reply_markup=menu
     )
 
 # =====================
-# MEDIA (VOICE / VIDEO)
+# CHECK SUB
 # =====================
 
-@dp.message_handler(content_types=["voice", "audio", "video", "video_note"])
+@dp.callback_query_handler(lambda c: c.data == "check_sub")
+async def check(c: types.CallbackQuery):
+
+    if check_sub(c.from_user.id):
+        await c.message.edit_text(
+            "✅ доступ открыт!",
+            reply_markup=None
+        )
+        await bot.send_message(c.from_user.id, "🎵 Меню:", reply_markup=menu)
+    else:
+        await c.answer("❌ ты не подписан", show_alert=True)
+
+# =====================
+# MEDIA (VOICE/AUDIO/VIDEO NOTE)
+# =====================
+
+@dp.message_handler(content_types=["voice", "audio", "video_note"])
 async def media(m: types.Message):
 
-    msg = await m.answer("🎧 ищу...")
+    if not check_sub(m.from_user.id):
+        return await m.answer("🚫 подпишись сначала", reply_markup=sub_kb)
+
+    msg = await m.answer("🎧 анализ...")
 
     file_id = (
         m.voice.file_id if m.voice else
         m.audio.file_id if m.audio else
-        m.video.file_id if m.video else
         m.video_note.file_id
     )
 
     file = await bot.get_file(file_id)
     url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
 
-    res = recognize_url(url)
+    res = recognize(url)
 
     if not res or not res.get("result"):
         return await msg.edit_text("❌ не найдено")
@@ -166,6 +169,53 @@ async def media(m: types.Message):
     conn.commit()
 
     img = cover(artist, title)
+    links = build_links(artist, title)
+
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("🎧 Spotify", url=links["spotify"]),
+        InlineKeyboardButton("▶️ YouTube", url=links["youtube"])
+    )
+    kb.add(
+        InlineKeyboardButton("🎵 Яндекс", url=links["yandex"]),
+        InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}")
+    )
+
+    if img:
+        await bot.send_photo(m.chat.id, img, caption=f"🎵 {song}", reply_markup=kb)
+    else:
+        await msg.edit_text(f"🎵 {song}", reply_markup=kb)
+
+# =====================
+# VIDEO SEARCH
+# =====================
+
+@dp.message_handler(content_types=["video"])
+async def video(m: types.Message):
+
+    if not check_sub(m.from_user.id):
+        return await m.answer("🚫 подпишись сначала", reply_markup=sub_kb)
+
+    msg = await m.answer("📹 анализ видео...")
+
+    file = await bot.get_file(m.video.file_id)
+    url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+
+    res = recognize(url)
+
+    if not res or not res.get("result"):
+        return await msg.edit_text("❌ не найдено")
+
+    artist = res["result"]["artist"]
+    title = res["result"]["title"]
+
+    song = f"{artist} - {title}"
+
+    cur.execute("INSERT INTO history VALUES (?,?)", (m.from_user.id, song))
+    conn.commit()
+
+    img = cover(artist, title)
+    links = build_links(artist, title)
 
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}"))
@@ -185,8 +235,8 @@ async def text(m: types.Message):
     if m.text.startswith("/"):
         return
 
-    if m.text in ["🎧 Распознать","🔎 Поиск текста","📎 Поиск по ссылке","⭐ Избранное","📜 История","ℹ️ Помощь"]:
-        return
+    if not check_sub(m.from_user.id):
+        return await m.answer("🚫 подпишись сначала", reply_markup=sub_kb)
 
     msg = await m.answer("🔎 ищу...")
 
@@ -208,56 +258,24 @@ async def text(m: types.Message):
     conn.commit()
 
     img = cover(artist, title)
+    links = build_links(artist, title)
 
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}"))
-
-    if img:
-        await bot.send_photo(m.chat.id, img, caption=song, reply_markup=kb)
-    else:
-        await msg.edit_text(song, reply_markup=kb)
-
-# =====================
-# LINK SEARCH (REAL)
-# =====================
-
-@dp.message_handler(lambda m: m.text == "📎 Поиск по ссылке")
-async def link_help(m: types.Message):
-    await m.answer(
-        "📎 Отправь ссылку:\n"
-        "TikTok / Reels / Shorts\n\n"
-        "Я извлеку звук и найду трек 🎧"
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("🎧 Spotify", url=links["spotify"]),
+        InlineKeyboardButton("▶️ YouTube", url=links["youtube"])
+    )
+    kb.add(
+        InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}")
     )
 
-@dp.message_handler(lambda m: "tiktok" in (m.text or "") or "youtu" in (m.text or "") or "instagram" in (m.text or ""))
-async def link_handler(m: types.Message):
-
-    msg = await m.answer("📥 скачиваю видео...")
-
-    audio = download_audio(m.text)
-
-    if not audio:
-        return await msg.edit_text("❌ не удалось скачать")
-
-    res = recognize_url(audio)
-
-    if not res or not res.get("result"):
-        return await msg.edit_text("❌ не найдено")
-
-    artist = res["result"]["artist"]
-    title = res["result"]["title"]
-
-    song = f"{artist} - {title}"
-
-    img = cover(artist, title)
-
     if img:
-        await bot.send_photo(m.chat.id, img, caption=song)
+        await bot.send_photo(m.chat.id, img, caption=f"🎵 {song}", reply_markup=kb)
     else:
-        await msg.edit_text(song)
+        await msg.edit_text(f"🎵 {song}", reply_markup=kb)
 
 # =====================
-# CALLBACKS
+# FAVORITES
 # =====================
 
 @dp.callback_query_handler(lambda c: c.data.startswith("fav|"))
@@ -271,6 +289,42 @@ async def fav(c: types.CallbackQuery):
     await c.answer("⭐ добавлено")
 
 # =====================
+# MENU
+# =====================
+
+@dp.message_handler(lambda m: m.text == "📜 История")
+async def history(m: types.Message):
+
+    cur.execute("SELECT song FROM history WHERE user_id=?", (m.from_user.id,))
+    rows = cur.fetchall()
+
+    if not rows:
+        return await m.answer("📜 пусто")
+
+    await m.answer("\n".join([r[0] for r in rows[-10:]]))
+
+@dp.message_handler(lambda m: m.text == "⭐ Избранное")
+async def favs(m: types.Message):
+
+    cur.execute("SELECT song FROM favs WHERE user_id=?", (m.from_user.id,))
+    rows = cur.fetchall()
+
+    if not rows:
+        return await m.answer("⭐ пусто")
+
+    await m.answer("\n".join([r[0] for r in rows[-10:]]))
+
+@dp.message_handler(lambda m: m.text == "ℹ️ Помощь")
+async def help(m: types.Message):
+    await m.answer(
+        "🎵 Бот:\n"
+        "• голос → трек\n"
+        "• видео → трек\n"
+        "• текст → поиск\n"
+        "⭐ избранное\n📜 история"
+    )
+
+# =====================
 # ADMIN
 # =====================
 
@@ -280,11 +334,16 @@ async def admin(m: types.Message):
     if m.from_user.id != ADMIN_ID:
         return
 
-    u, h, f = stats()
+    cur.execute("SELECT COUNT(*) FROM users")
+    u = cur.fetchone()[0]
 
-    await m.answer(
-        f"📊 ADMIN\n\n👥 {u}\n🔎 {h}\n⭐ {f}"
-    )
+    cur.execute("SELECT COUNT(*) FROM history")
+    h = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM favs")
+    f = cur.fetchone()[0]
+
+    await m.answer(f"📊 ADMIN\n\n👥 {u}\n🔎 {h}\n⭐ {f}")
 
 # =====================
 # RUN
