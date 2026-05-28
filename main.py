@@ -656,12 +656,15 @@ async def video_handler(message: types.Message):
 
 @dp.message_handler(content_types=["text"])
 async def text_handler(message: types.Message):
+    @dp.message_handler(content_types=["text"])
+async def text_handler(message: types.Message):
+
+    # ❌ игнорируем команды
     if message.text.startswith("/"):
-        return
-    if message.text == "📖 Инструкция":
         return
 
-    if message.text.startswith("/"):
+    # ❌ игнорируем кнопку инструкции
+    if message.text == "📖 Инструкция":
         return
 
     wait = await message.answer("🔎 Ищу трек...")
@@ -681,7 +684,6 @@ async def text_handler(message: types.Message):
         results = r.get("results", [])
 
         if not results:
-
             await wait.edit_text("❌ Трек не найден")
             return
 
@@ -701,58 +703,24 @@ async def text_handler(message: types.Message):
 
     except Exception as e:
 
-        print(e)
+        print("TEXT ERROR:", e)
 
         await wait.edit_text("❌ Ошибка поиска")
-    try:
-
-        r = requests.get(
-            "https://api.lyrics.ovh/suggest/" + message.text,
-            timeout=15
-        ).json()
-
-        data = r.get("data")
-
-        if not data:
-
-            await wait.edit_text(
-                "❌ Трек не найден"
-            )
-
-            return
-
-        first = data[0]
-
-        artist = first["artist"]["name"]
-        title = first["title"]
-
-        await wait.delete()
-
-        await send_result(
-            message,
-            artist,
-            title,
-            "text"
-        )
-
-    except Exception as e:
-
-        print(e)
-
-        await wait.edit_text(
-            "❌ Ошибка поиска"
-        )
-
 # =====================================================
 # ADMIN
 # =====================================================
 
-await message.answer("ADMIN WORKS")
-print("ADMIN HIT")
+@dp.message_handler(commands=["admin"])
+async def admin_handler(message: types.Message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    await message.answer("ADMIN WORKS")
 
 if __name__ == "__main__":
     
-    executor. start_polling(
+    executor.start_polling(
         dp,
         skip_updates=True
     )
