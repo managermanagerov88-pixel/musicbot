@@ -209,11 +209,75 @@ def get_cover(artist, title):
 
     try:
 
+        query = f"{artist} {title}"
+
+        artist_l = artist.lower().strip()
+        title_l = title.lower().strip()
+
         # =====================================
-        # ITUNES
+        # 1. DEEZER (основной источник)
         # =====================================
 
-        query = f"{artist} {title}"
+        dz = requests.get(
+            "https://api.deezer.com/search",
+            params={"q": query},
+            timeout=15
+        ).json()
+
+        data = dz.get("data", [])
+
+        best_cover = None
+        best_score = -1
+
+        banned = [
+            "remix",
+            "live",
+            "karaoke",
+            "instrumental",
+            "slowed",
+            "speed up",
+            "nightcore",
+            "edit",
+            "cover"
+        ]
+
+        for item in data:
+
+            t = item.get("title", "").lower()
+            a = item.get("artist", {}).get("name", "").lower()
+
+            album = item.get("album", {})
+            cover = album.get("cover_xl")
+
+            if not cover:
+                continue
+
+            # фильтр мусора
+            if any(b in t for b in banned):
+                continue
+
+            score = 0
+
+            if artist_l == a:
+                score += 100
+            elif artist_l in a:
+                score += 60
+
+            if title_l == t:
+                score += 100
+            elif title_l in t:
+                score += 60
+
+            if score > best_score:
+                best_score = score
+                best_cover = cover
+
+        if best_cover:
+            return best_cover
+
+        # =====================================
+        # 2. ITUNES (fallback)
+        # =====================================
 
         r = requests.get(
             "https://itunes.apple.com/search",
@@ -225,108 +289,42 @@ def get_cover(artist, title):
             timeout=15
         ).json()
 
-        results = r.get("results")
+        results = r.get("results", [])
 
-        if results:
+        best_cover = None
+        best_score = -1
 
-            artist_lower = artist.lower()
-            title_lower = title.lower()
+        for item in results:
 
-            best_score = -1
-            best_cover = None
+            a = item.get("artistName", "").lower()
+            t = item.get("trackName", "").lower()
 
-            banned = [
-                "remix",
-                "live",
-                "karaoke",
-                "instrumental",
-                "slowed",
-                "speed up",
-                "nightcore"
-            ]
+            if any(b in t for b in banned):
+                continue
 
-            for item in results:
+            score = 0
 
-                item_artist = item.get(
-                    "artistName",
-                    ""
-                ).lower()
+            if artist_l == a:
+                score += 100
+            elif artist_l in a:
+                score += 50
 
-                item_title = item.get(
-                    "trackName",
-                    ""
-                ).lower()
+            if title_l == t:
+                score += 100
+            elif title_l in t:
+                score += 50
 
-                bad = False
+            if score > best_score:
+                best_score = score
+                best_cover = item.get("artworkUrl100")
 
-                for b in banned:
-
-                    if b in item_title:
-                        bad = True
-                        break
-
-                if bad:
-                    continue
-
-                score = 0
-
-                if artist_lower == item_artist:
-                    score += 100
-
-                elif artist_lower in item_artist:
-                    score += 50
-
-                if title_lower == item_title:
-                    score += 100
-
-                elif title_lower in item_title:
-                    score += 50
-
-                if score > best_score:
-
-                    best_score = score
-
-                    best_cover = item.get(
-                        "artworkUrl100"
-                    )
-
-            if best_cover:
-
-                return best_cover.replace(
-                    "100x100",
-                    "1200x1200"
-                )
-
-        # =====================================
-        # DEEZER FALLBACK
-        # =====================================
-
-        deezer = requests.get(
-            "https://api.deezer.com/search",
-            params={
-                "q": query
-            },
-            timeout=15
-        ).json()
-
-        data = deezer.get("data")
-
-        if data:
-
-            first = data[0]
-
-            if first.get("album"):
-
-                return first["album"].get(
-                    "cover_xl"
-                )
+        if best_cover:
+            return best_cover.replace("100x100", "600x600")
 
         return None
 
     except Exception as e:
-
         print(e)
-
         return None
 
     try:
