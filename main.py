@@ -668,25 +668,51 @@ async def text_handler(message: types.Message):
     try:
 
         r = requests.get(
-            "https://itunes.apple.com/search",
-            params={
-                "term": message.text,
-                "entity": "song",
-                "limit": 5
-            },
-            timeout=15
-        ).json()
+    "https://itunes.apple.com/search",
+    params={
+        "term": message.text,
+        "entity": "song",
+        "limit": 10
+    },
+    timeout=15
+).json()
 
-        results = r.get("results", [])
+results = r.get("results", [])
 
-        if not results:
-            await wait.edit_text("❌ Трек не найден")
-            return
+if not results:
+    await wait.edit_text("❌ Трек не найден")
+    return
 
-        best = results[0]
+best = None
+best_score = -1
 
-        artist = best.get("artistName", "Unknown")
-        title = best.get("trackName", "Unknown")
+query_lower = message.text.lower()
+
+for item in results:
+
+    artist = item.get("artistName", "").lower()
+    title = item.get("trackName", "").lower()
+
+    score = 0
+
+    if query_lower in title:
+        score += 50
+    if query_lower in artist:
+        score += 30
+
+    if title in query_lower:
+        score += 50
+
+    if score > best_score:
+        best_score = score
+        best = item
+
+if not best:
+    await wait.edit_text("❌ Трек не найден")
+    return
+
+artist = best.get("artistName", "Unknown")
+title = best.get("trackName", "Unknown")
 
         await wait.delete()
 
