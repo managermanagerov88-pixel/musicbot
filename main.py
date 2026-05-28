@@ -38,7 +38,6 @@ first_seen TEXT
 cur.execute("""
 CREATE TABLE IF NOT EXISTS stats (
 user_id INTEGER,
-type TEXT,
 time TEXT
 )
 """)
@@ -46,31 +45,7 @@ time TEXT
 conn.commit()
 
 # =====================
-# UI
-# =====================
-
-menu = ReplyKeyboardMarkup(resize_keyboard=True)
-menu.row("ℹ️ Помощь")
-
-sub_kb = InlineKeyboardMarkup()
-sub_kb.add(
-    InlineKeyboardButton("📢 Подписка", url=f"https://t.me/{CHANNEL.replace('@','')}"),
-    InlineKeyboardButton("🔄 Проверить", callback_data="check_sub")
-)
-
-# =====================
-# SUB CHECK
-# =====================
-
-async def is_sub(user_id):
-    try:
-        chat = await bot.get_chat_member(CHANNEL, user_id)
-        return chat.status in ["member", "administrator", "creator"]
-    except:
-        return False
-
-# =====================
-# AUDIO IDENTIFY
+# HELPERS
 # =====================
 
 def audd(url):
@@ -84,45 +59,54 @@ def audd(url):
     except:
         return None
 
-# =====================
-# LYRICS (optional fallback)
-# =====================
-
-def lyrics(text):
-    try:
-        r = requests.get(
-            "https://api.audd.io/findLyrics/",
-            params={"q": text, "api_token": AUDD_API_KEY},
-            timeout=20
-        )
-        return r.json()
-    except:
-        return None
 
 # =====================
-# COVER (FIXED - STABLE)
+# FIXED COVER (REAL FIX)
 # =====================
 
 def cover(artist, title):
     try:
+        q = f"{artist} {title}".strip()
+
         r = requests.get(
             "https://itunes.apple.com/search",
-            params={"term": f"{artist} {title}", "limit": 10}
+            params={"term": q, "limit": 10}
         ).json()
 
         if r.get("resultCount", 0) == 0:
             return None
 
+        best = None
+        best_score = 0
+
         for item in r["results"]:
+            a = item.get("artistName", "").lower()
+            t = item.get("trackName", "").lower()
+
+            score = 0
+
+            if artist.lower() in a:
+                score += 2
+            if title.lower() in t:
+                score += 2
             if "artworkUrl100" in item:
-                return item["artworkUrl100"].replace("100x100", "600x600")
+                score += 1
+
+            if score > best_score:
+                best_score = score
+                best = item
+
+        if best and "artworkUrl100" in best:
+            return best["artworkUrl100"].replace("100x100", "600x600")
 
         return None
+
     except:
         return None
 
+
 # =====================
-# LINKS (ALWAYS FULL)
+# LINKS
 # =====================
 
 def links(a, t):
@@ -133,6 +117,7 @@ def links(a, t):
         "ya": f"https://music.yandex.ru/search?text={q}",
         "gn": f"https://genius.com/search?q={q}"
     }
+
 
 # =====================
 # START
@@ -145,109 +130,22 @@ async def start(m: types.Message):
                 (m.from_user.id, str(datetime.now())))
     conn.commit()
 
-    await m.answer(
-        "🎧 SPACE SEARCH\n\n"
-        "📌 Отправь:\n"
-        "• голос\n"
-        "• кружок\n"
-        "• видео\n"
-        "• текст\n\n"
-        "И я найду трек автоматически 🔎",
-        reply_markup=menu
-    )
+    await m.answer("🎧 Bot ready")
+
 
 # =====================
-# HELP
+# PROCESS
 # =====================
 
-@dp.message_handler(lambda m: m.text == "ℹ️ Помощь")
-async def help(m: types.Message):
+async def send_track(m, artist, title):
 
-    await m.answer(
-        "ℹ️ Как пользоваться:\n\n"
-        "1. просто отправь голос / кружок / видео / текст\n"
-        "2. бот сам распознаёт музыку\n"
-        "3. получишь ссылки + обложку\n\n"
-        "💡 можно отправлять подряд без кнопок"
-    )
-
-# =====================
-# MAIN SEARCH (NO BUTTON MODE ANYMORE)
-# =====================
-
-@dp.message_handler(content_types=["voice", "video", "audio", "video_note", "text"])
-async def handler(m: types.Message):
-
-    # ignore commands
-    if m.text and m.text.startswith("/"):
-        return
-
-    await process(m)
-
-# =====================
-# CORE PROCESS
-# =====================
-
-async def process(m: types.Message):
-
-    msg = await m.answer("🔎 ищу трек...")
-
-    file_id = None
-
-    if m.voice:
-        file_id = m.voice.file_id
-    elif m.video:
-        file_id = m.video.file_id
-    elif m.audio:
-        file_id = m.audio.file_id
-    elif m.video_note:
-        file_id = m.video_note.file_id
-    elif m.text:
-        # text search fallback
-        res = lyrics(m.text)
-        if not res or not res.get("result"):
-            return await msg.edit_text("❌ не найдено")
-
-        item = res["result"][0]
-        a = item.get("artist", "Unknown")
-        t = item.get("title", m.text)
-
-        await send_result(m, msg, a, t)
-        return
-
-    # audio/video recognition
-    if not file_id:
-        return await msg.edit_text("❌ не найдено")
-
-    file = await bot.get_file(file_id)
-    url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
-
-    res = audd(url)
-
-    if not res or not res.get("result"):
-        return await msg.edit_text("❌ не найдено")
-
-    item = res["result"]
-
-    a = item.get("artist", "Unknown")
-    t = item.get("title", "Unknown")
-
-    await send_result(m, msg, a, t)
-
-# =====================
-# SEND RESULT
-# =====================
-
-async def send_result(m, msg, a, t):
-
-    cur.execute("INSERT INTO stats VALUES (?,?,?)",
-                (m.from_user.id, "search", str(datetime.now())))
+    # ⚡ FIXED STATS (admin will work now)
+    cur.execute("INSERT INTO stats VALUES (?,?)",
+                (m.from_user.id, str(datetime.now())))
     conn.commit()
 
-    song = f"{a} - {t}"
-
-    img = cover(a, t)
-    l = links(a, t)
+    img = cover(artist, title)
+    l = links(artist, title)
 
     kb = InlineKeyboardMarkup()
     kb.add(
@@ -259,15 +157,46 @@ async def send_result(m, msg, a, t):
         InlineKeyboardButton("📜 Genius", url=l["gn"])
     )
 
-    text = f"🎵 {song}"
+    text = f"🎵 {artist} - {title}"
 
     if img:
         await bot.send_photo(m.chat.id, img, caption=text, reply_markup=kb)
     else:
-        await msg.edit_text(text, reply_markup=kb)
+        await m.answer(text, reply_markup=kb)
+
 
 # =====================
-# ADMIN PANEL
+# MEDIA HANDLER
+# =====================
+
+@dp.message_handler(content_types=["voice", "video", "audio", "video_note"])
+async def media(m: types.Message):
+
+    msg = await m.answer("🔎 ищу...")
+
+    file_id = (
+        m.voice.file_id if m.voice else
+        m.video.file_id if m.video else
+        m.audio.file_id if m.audio else
+        m.video_note.file_id
+    )
+
+    file = await bot.get_file(file_id)
+    url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+
+    res = audd(url)
+
+    if not res or not res.get("result"):
+        return await msg.edit_text("❌ не найдено")
+
+    a = res["result"].get("artist", "Unknown")
+    t = res["result"].get("title", "Unknown")
+
+    await send_track(m, a, t)
+
+
+# =====================
+# ADMIN (FIXED)
 # =====================
 
 @dp.message_handler(commands=["admin"])
@@ -287,6 +216,7 @@ async def admin(m: types.Message):
         f"👤 users: {users}\n"
         f"🔎 searches: {searches}"
     )
+
 
 # =====================
 # RUN
