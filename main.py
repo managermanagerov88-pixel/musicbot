@@ -690,22 +690,47 @@ async def text_handler(message: types.Message):
 
         for item in results:
 
-            artist = item.get("artistName", "").lower()
-            title = item.get("trackName", "").lower()
+    artist_raw = item.get("artistName", "")
+    title_raw = item.get("trackName", "")
 
-            score = 0
+    artist = artist_raw.lower()
+    title = title_raw.lower()
 
-            if query_lower in title:
-                score += 50
-            if query_lower in artist:
-                score += 30
+    score = 0
 
-            if title in query_lower:
-                score += 50
+    query_words = set(query_lower.split())
+    title_words = set(title.split())
+    artist_words = set(artist.split())
 
-            if score > best_score:
-                best_score = score
-                best = item
+    # 1. точное совпадение всей строки
+    if query_lower == title:
+        score += 200
+
+    # 2. частичное совпадение фраз
+    if query_lower in title:
+        score += 120
+
+    # 3. совпадение слов (главное улучшение)
+    common_title = query_words & title_words
+    common_artist = query_words & artist_words
+
+    score += len(common_title) * 25
+    score += len(common_artist) * 15
+
+    # 4. бонус если артист совпадает сильно
+    if artist in query_lower:
+        score += 60
+
+    # 5. штраф за слишком “шумные” названия
+    bad_words = ["remix", "sped up", "slowed", "nightcore", "cover", "live"]
+
+    if any(b in title for b in bad_words):
+        score -= 40
+
+    # выбор лучшего
+    if score > best_score:
+        best_score = score
+        best = item
 
         if not best:
             await wait.edit_text("❌ Трек не найден")
