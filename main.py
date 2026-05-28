@@ -655,7 +655,8 @@ async def video_handler(message: types.Message):
 
 @dp.message_handler(content_types=["text"])
 async def text_handler(message: types.Message):
-
+    if message.text.startswith("/"):
+        return
     if message.text == "📖 Инструкция":
         return
 
@@ -747,7 +748,7 @@ async def text_handler(message: types.Message):
 
 @dp.message_handler(commands=["admin"])
 async def admin_handler(message: types.Message):
-
+    print("ADMIN HIT")
     print("ADMIN COMMAND TRIGGERED")
 
     if message.from_user.id != ADMIN_ID:
