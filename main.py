@@ -1,3 +1,4 @@
+print("BOT STARTED")
 import logging
 import sqlite3
 import requests
@@ -746,16 +747,5 @@ async def text_handler(message: types.Message):
 # ADMIN
 # =====================================================
 
-@dp.message_handler(commands=["admin"])
-async def admin_handler(message: types.Message):
-
-    print("ADMIN CALLED")
-
-    await message.answer("ADMIN WORKS")
-
-if __name__ == "__main__":
-
-    executor.start_polling(
-        dp,
-        skip_updates=True
-    )
+await message.answer("ADMIN WORKS")
+print("ADMIN HIT")
