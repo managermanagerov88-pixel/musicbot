@@ -47,10 +47,10 @@ time TEXT
 conn.commit()
 
 # =====================
-# STATE (ONLY ONE MODE)
+# STATE (ONLY ONE)
 # =====================
 
-WAIT_SEARCH = {}
+search_mode = set()
 
 # =====================
 # UI
@@ -59,12 +59,6 @@ WAIT_SEARCH = {}
 menu = ReplyKeyboardMarkup(resize_keyboard=True)
 menu.row("🔎 Поиск")
 menu.row("⭐ Избранное", "ℹ️ Помощь")
-
-sub_kb = InlineKeyboardMarkup()
-sub_kb.add(
-    InlineKeyboardButton("📢 Подписка", url=f"https://t.me/{CHANNEL.replace('@','')}"),
-    InlineKeyboardButton("🔄 Проверить", callback_data="check_sub")
-)
 
 # =====================
 # SUB CHECK
@@ -79,7 +73,7 @@ async def is_sub(user_id):
 
 async def guard(m):
     if not await is_sub(m.from_user.id):
-        await m.answer("🚫 Подпишись на канал", reply_markup=sub_kb)
+        await m.answer("🚫 Подпишись на канал")
         return False
     return True
 
@@ -87,11 +81,11 @@ async def guard(m):
 # HELPERS
 # =====================
 
-def audd_recognize(url):
+def audd(file_url):
     try:
         r = requests.post(
             "https://api.audd.io/",
-            data={"api_token": AUDD_API_KEY, "url": url},
+            data={"api_token": AUDD_API_KEY, "url": file_url},
             timeout=25
         )
         return r.json()
@@ -99,7 +93,7 @@ def audd_recognize(url):
         return None
 
 
-def lyrics_search(text):
+def lyrics(text):
     try:
         r = requests.get(
             "https://api.audd.io/findLyrics/",
@@ -111,22 +105,17 @@ def lyrics_search(text):
         return None
 
 
-def cover_real(artist, title):
-    """
-    ВАЖНО: фикс неправильных обложек
-    теперь берём только точное совпадение
-    """
+def cover(artist, title):
     try:
-        q = f"{artist} {title}"
-
         r = requests.get(
             "https://itunes.apple.com/search",
-            params={"term": q, "limit": 1}
+            params={"term": f"{artist} {title}", "limit": 1}
         ).json()
 
-        if r.get("resultCount") > 0:
+        if r.get("resultCount", 0) > 0:
             item = r["results"][0]
 
+            # FIX: убираем рандомные обложки
             if artist.lower() in item["artistName"].lower():
                 return item["artworkUrl100"].replace("100x100", "600x600")
 
@@ -145,37 +134,23 @@ def links(a, t):
     }
 
 # =====================
-# USER REGISTER
-# =====================
-
-def add_user(uid):
-    cur.execute("INSERT OR IGNORE INTO users VALUES (?,?)", (uid, str(date.today())))
-    conn.commit()
-
-# =====================
 # START
 # =====================
 
 @dp.message_handler(commands=["start"])
 async def start(m: types.Message):
 
-    add_user(m.from_user.id)
-
     if not await is_sub(m.from_user.id):
-        return await m.answer("🚫 Подпишись на канал", reply_markup=sub_kb)
+        return await m.answer("🚫 Подпишись")
 
     await m.answer(
         "🎧 SPACE SEARCH\n\n"
-        "🔎 Поиск музыки по:\n"
-        "• голосу\n"
-        "• видео\n"
-        "• тексту\n\n"
-        "Нажми 🔎 Поиск и отправь любой контент",
+        "🔎 нажми Поиск → отправь голос/видео/текст",
         reply_markup=menu
     )
 
 # =====================
-# SINGLE SEARCH BUTTON (FIXED FLOW)
+# SEARCH MODE (FIXED)
 # =====================
 
 @dp.message_handler(lambda m: m.text == "🔎 Поиск")
@@ -184,16 +159,9 @@ async def search(m: types.Message):
     if not await guard(m):
         return
 
-    WAIT_SEARCH[m.from_user.id] = True
+    search_mode.add(m.from_user.id)
 
-    await m.answer(
-        "🎯 Режим поиска включён\n\n"
-        "📩 Отправь:\n"
-        "• голосовое\n"
-        "• видео\n"
-        "• текст\n\n"
-        "Я всё распознаю автоматически"
-    )
+    await m.answer("📩 отправь голос / видео / текст")
 
 # =====================
 # HELP
@@ -202,15 +170,11 @@ async def search(m: types.Message):
 @dp.message_handler(lambda m: m.text == "ℹ️ Помощь")
 async def help(m: types.Message):
 
-    if not await guard(m):
-        return
-
     await m.answer(
-        "ℹ️ Как пользоваться:\n\n"
-        "1️⃣ нажми Поиск\n"
-        "2️⃣ отправь голос / видео / текст\n"
-        "3️⃣ получи трек\n\n"
-        "⭐ избранное — сохранение треков"
+        "ℹ️ как пользоваться:\n"
+        "1. Поиск\n"
+        "2. отправь контент\n"
+        "3. получи трек"
     )
 
 # =====================
@@ -218,10 +182,7 @@ async def help(m: types.Message):
 # =====================
 
 @dp.message_handler(lambda m: m.text == "⭐ Избранное")
-async def fav(m: types.Message):
-
-    if not await guard(m):
-        return
+async def favs(m: types.Message):
 
     cur.execute("SELECT song FROM favs WHERE user_id=?", (m.from_user.id,))
     rows = cur.fetchall()
@@ -230,7 +191,7 @@ async def fav(m: types.Message):
         return await m.answer("⭐ пусто")
 
     kb = InlineKeyboardMarkup()
-    text = "⭐ Избранное:\n\n"
+    text = "⭐ избранное:\n\n"
 
     for r in rows:
         text += f"• {r[0]}\n"
@@ -239,7 +200,7 @@ async def fav(m: types.Message):
     await m.answer(text, reply_markup=kb)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("del|"))
-async def del_fav(c: types.CallbackQuery):
+async def delete(c: types.CallbackQuery):
 
     song = c.data.split("|", 1)[1]
 
@@ -250,32 +211,29 @@ async def del_fav(c: types.CallbackQuery):
     await c.message.delete()
 
 # =====================
-# MEDIA SEARCH (VOICE / VIDEO FIXED)
+# MEDIA SEARCH (VOICE / VIDEO / AUDIO)
 # =====================
 
 @dp.message_handler(content_types=["voice", "video", "audio"])
 async def media(m: types.Message):
 
-    if not WAIT_SEARCH.get(m.from_user.id):
+    if m.from_user.id not in search_mode:
         return
 
-    if not await guard(m):
-        return
-
-    WAIT_SEARCH[m.from_user.id] = False
+    search_mode.discard(m.from_user.id)
 
     msg = await m.answer("🔎 ищу...")
 
     file_id = (
         m.voice.file_id if m.voice else
         m.video.file_id if m.video else
-        m.audio.file_id if m.audio else None
+        m.audio.file_id
     )
 
     file = await bot.get_file(file_id)
     url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
 
-    res = audd_recognize(url)
+    res = audd(url)
 
     if not res or not res.get("result"):
         return await msg.edit_text("❌ не найдено")
@@ -285,54 +243,38 @@ async def media(m: types.Message):
 
     song = f"{a} - {t}"
 
-    cur.execute("INSERT INTO stats VALUES (?,?,?)",
-                (m.from_user.id, "media", str(datetime.now())))
-    conn.commit()
-
-    img = cover_real(a, t)
+    img = cover(a, t)
     l = links(a, t)
 
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("▶ YouTube", url=l["yt"]),
-        InlineKeyboardButton("🎧 Spotify", url=l["sp"])
+        InlineKeyboardButton("YouTube", url=l["yt"]),
+        InlineKeyboardButton("Spotify", url=l["sp"])
     )
     kb.add(
-        InlineKeyboardButton("🎵 Yandex", url=l["ya"]),
-        InlineKeyboardButton("📜 Genius", url=l["gn"])
+        InlineKeyboardButton("⭐", callback_data=f"fav|{song}")
     )
-    kb.add(
-        InlineKeyboardButton("⭐ в избранное", callback_data=f"fav|{song}")
-    )
-
-    text = f"🎵 {song}"
 
     if img:
-        await bot.send_photo(m.chat.id, img, caption=text, reply_markup=kb)
+        await bot.send_photo(m.chat.id, img, caption=song, reply_markup=kb)
     else:
-        await msg.edit_text(text, reply_markup=kb)
+        await msg.edit_text(song, reply_markup=kb)
 
 # =====================
-# TEXT SEARCH FIXED
+# TEXT SEARCH (ONLY WHEN MODE ON)
 # =====================
 
 @dp.message_handler()
 async def text(m: types.Message):
 
-    if m.text.startswith("/"):
+    if m.from_user.id not in search_mode:
         return
 
-    if not WAIT_SEARCH.get(m.from_user.id):
-        return
-
-    if not await guard(m):
-        return
-
-    WAIT_SEARCH[m.from_user.id] = False
+    search_mode.discard(m.from_user.id)
 
     msg = await m.answer("🔎 ищу...")
 
-    r = lyrics_search(m.text)
+    r = lyrics(m.text)
 
     if not r or not r.get("result"):
         return await msg.edit_text("❌ не найдено")
@@ -342,16 +284,16 @@ async def text(m: types.Message):
 
     song = f"{a} - {t}"
 
-    img = cover_real(a, t)
+    img = cover(a, t)
     l = links(a, t)
 
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("▶ YouTube", url=l["yt"]),
-        InlineKeyboardButton("🎧 Spotify", url=l["sp"])
+        InlineKeyboardButton("YouTube", url=l["yt"]),
+        InlineKeyboardButton("Spotify", url=l["sp"])
     )
     kb.add(
-        InlineKeyboardButton("⭐ в избранное", callback_data=f"fav|{song}")
+        InlineKeyboardButton("⭐", callback_data=f"fav|{song}")
     )
 
     if img:
@@ -374,7 +316,7 @@ async def fav_add(c: types.CallbackQuery):
     await c.answer("добавлено")
 
 # =====================
-# ADMIN (FIXED 100%)
+# ADMIN FIXED
 # =====================
 
 @dp.message_handler(commands=["admin"])
@@ -387,12 +329,10 @@ async def admin(m: types.Message):
     users = cur.fetchone()[0]
 
     cur.execute("SELECT COUNT(*) FROM stats")
-    searches = cur.fetchone()[0]
+    stats = cur.fetchone()[0]
 
     await m.answer(
-        f"🛠 ADMIN\n\n"
-        f"👤 users: {users}\n"
-        f"🔎 searches: {searches}"
+        f"ADMIN\n\nusers: {users}\nstats: {stats}"
     )
 
 # =====================
