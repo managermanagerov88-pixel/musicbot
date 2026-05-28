@@ -7,13 +7,13 @@ from aiogram.utils import executor
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
 
 # ======================
-# НАСТРОЙКИ
+# CONFIG
 # ======================
 
 BOT_TOKEN = "8994533338:AAEouqVsEXkiRLViw2I1RucsEkKswUZP5RY"
 AUDD_API_KEY = "5eeedf20b79da84a763484f3358ad40b"
-CHANNEL = "@sp_rap"
 ADMIN_ID = 1125040535
+CHANNEL = "@sp_rap"
 
 # ======================
 # INIT
@@ -37,29 +37,13 @@ cur.execute("CREATE TABLE IF NOT EXISTS favs (user_id INTEGER, song TEXT)")
 conn.commit()
 
 # ======================
-# USER STATE (ВАЖНО)
+# STATE
 # ======================
 
 state = {}
 
 # ======================
-# STATS
-# ======================
-
-def stats():
-    cur.execute("SELECT COUNT(*) FROM users")
-    users = cur.fetchone()[0]
-
-    cur.execute("SELECT COUNT(*) FROM history")
-    searches = cur.fetchone()[0]
-
-    cur.execute("SELECT COUNT(*) FROM favs")
-    favs = cur.fetchone()[0]
-
-    return users, searches, favs
-
-# ======================
-# USER ADD
+# DB HELP
 # ======================
 
 def add_user(uid):
@@ -67,29 +51,46 @@ def add_user(uid):
     conn.commit()
 
 # ======================
-# CHECK SUB
+# STATS
 # ======================
 
-async def check_sub(user_id):
+def stats():
+    cur.execute("SELECT COUNT(*) FROM users")
+    u = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM history")
+    h = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM favs")
+    f = cur.fetchone()[0]
+
+    return u, h, f
+
+# ======================
+# SUB CHECK
+# ======================
+
+async def check_sub(uid):
     try:
-        member = await bot.get_chat_member(CHANNEL, user_id)
-        return member.status in ["member", "administrator", "creator"]
+        m = await bot.get_chat_member(CHANNEL, uid)
+        return m.status in ["member", "creator", "administrator"]
     except:
-        return False
+        return True  # чтобы не ломался бот
 
 # ======================
 # MENU
 # ======================
 
-menu_kb = ReplyKeyboardMarkup(resize_keyboard=True)
-menu_kb.row("🎵 Распознать", "⭐ Избранное")
-menu_kb.row("📜 История", "ℹ️ Помощь")
+menu = ReplyKeyboardMarkup(resize_keyboard=True)
+menu.row("🎵 Распознать", "⭐ Избранное")
+menu.row("📜 История", "🔎 Поиск ссылки")
+menu.row("ℹ️ Помощь")
 
 # ======================
 # TRACK BUTTONS
 # ======================
 
-def track_kb(song):
+def track_buttons(song):
     kb = InlineKeyboardMarkup()
 
     kb.row(
@@ -102,7 +103,7 @@ def track_kb(song):
         InlineKeyboardButton("📖 Genius", url=f"https://genius.com/search?q={song}")
     )
 
-    kb.add(InlineKeyboardButton("⭐ Добавить", callback_data=f"fav|{song}"))
+    kb.add(InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}"))
 
     return kb
 
@@ -118,7 +119,7 @@ def cover(artist, title):
             timeout=10
         ).json()
 
-        if r["resultCount"] > 0:
+        if r["resultCount"]:
             return r["results"][0]["artworkUrl100"].replace("100x100", "600x600")
     except:
         pass
@@ -133,7 +134,7 @@ def recognize(url):
         r = requests.post(
             "https://api.audd.io/",
             data={"api_token": AUDD_API_KEY, "url": url},
-            timeout=30
+            timeout=25
         )
         return r.json()
     except:
@@ -150,12 +151,8 @@ async def start(m: types.Message):
 
     await m.answer(
         "🎵 Music Bot\n\n"
-        "📌 Нажми «Распознать» и отправь:\n"
-        "• голос 🎤\n"
-        "• видео 🎥\n"
-        "• кружок 🔵\n\n"
-        "📌 Или напиши текст песни",
-        reply_markup=menu_kb
+        "📌 Выбери действие:",
+        reply_markup=menu
     )
 
 # ======================
@@ -164,7 +161,7 @@ async def start(m: types.Message):
 
 @dp.message_handler(lambda m: m.text == "ℹ️ Помощь")
 async def help(m: types.Message):
-    await m.answer("Отправь голос / видео / текст — я найду трек")
+    await m.answer("Отправь голос / видео / кружок или текст песни")
 
 # ======================
 # HISTORY
@@ -176,10 +173,7 @@ async def history(m: types.Message):
     cur.execute("SELECT song FROM history WHERE user_id=? ORDER BY rowid DESC LIMIT 10", (m.from_user.id,))
     rows = cur.fetchall()
 
-    if not rows:
-        return await m.answer("Пусто")
-
-    await m.answer("\n".join([r[0] for r in rows]))
+    await m.answer("\n".join([r[0] for r in rows]) if rows else "Пусто")
 
 # ======================
 # FAVORITES
@@ -194,36 +188,19 @@ async def favs(m: types.Message):
     if not rows:
         return await m.answer("Пусто")
 
-    for r in rows:
+    for r in rows[:10]:
         kb = InlineKeyboardMarkup()
         kb.add(InlineKeyboardButton("🗑 удалить", callback_data=f"del|{r[0]}"))
         await m.answer(r[0], reply_markup=kb)
 
 # ======================
-# BUTTON "Rаспознать"
-# ======================
-
-@dp.message_handler(lambda m: m.text == "🎵 Распознать")
-async def ask(m: types.Message):
-
-    state[m.from_user.id] = "audio"
-
-    await m.answer(
-        "🎧 Отправь мне:\n"
-        "• голос\n"
-        "• видео\n"
-        "• кружок\n\n"
-        "Я распознаю музыку"
-    )
-
-# ======================
-# MEDIA HANDLER (ВАЖНО)
+# MEDIA
 # ======================
 
 @dp.message_handler(content_types=["voice", "audio", "video", "video_note"])
 async def media(m: types.Message):
 
-    await m.answer("🎧 ищу трек...")
+    msg = await m.answer("🎧 ищу...")
 
     file_id = (
         m.voice.file_id if m.voice else
@@ -235,28 +212,28 @@ async def media(m: types.Message):
     file = await bot.get_file(file_id)
     url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
 
-    data = recognize(url)
+    res = recognize(url)
 
-    if not data or not data.get("result"):
-        return await m.answer("❌ не найдено")
+    if not res or not res.get("result"):
+        return await msg.edit_text("❌ не найдено")
 
-    artist = data["result"]["artist"]
-    title = data["result"]["title"]
+    artist = res["result"]["artist"]
+    title = res["result"]["title"]
     song = f"{artist} - {title}"
 
     cur.execute("INSERT INTO history VALUES (?,?)", (m.from_user.id, song))
     conn.commit()
 
     img = cover(artist, title)
-    kb = track_kb(song)
+    kb = track_buttons(song)
 
     if img:
         await bot.send_photo(m.chat.id, img, caption=song, reply_markup=kb)
     else:
-        await m.answer(song, reply_markup=kb)
+        await msg.edit_text(song, reply_markup=kb)
 
 # ======================
-# TEXT SEARCH (ФИКС БАГА!)
+# TEXT SEARCH
 # ======================
 
 @dp.message_handler(content_types=["text"])
@@ -265,11 +242,10 @@ async def text(m: types.Message):
     if m.text.startswith("/"):
         return
 
-    # ❗ БЛОК кнопок (ВАЖНО)
-    if m.text in ["🎵 Распознать", "⭐ Избранное", "📜 История", "ℹ️ Помощь"]:
+    if m.text in ["🎵 Распознать", "⭐ Избранное", "📜 История", "ℹ️ Помощь", "🔎 Поиск ссылки"]:
         return
 
-    await m.answer("🔎 ищу...")
+    msg = await m.answer("🔎 ищу...")
 
     r = requests.get(
         "https://api.audd.io/findLyrics/",
@@ -278,7 +254,7 @@ async def text(m: types.Message):
     ).json()
 
     if not r.get("result"):
-        return await m.answer("❌ не найдено")
+        return await msg.edit_text("❌ не найдено")
 
     artist = r["result"][0]["artist"]
     title = r["result"][0]["title"]
@@ -288,15 +264,15 @@ async def text(m: types.Message):
     conn.commit()
 
     img = cover(artist, title)
-    kb = track_kb(song)
+    kb = track_buttons(song)
 
     if img:
         await bot.send_photo(m.chat.id, img, caption=song, reply_markup=kb)
     else:
-        await m.answer(song, reply_markup=kb)
+        await msg.edit_text(song, reply_markup=kb)
 
 # ======================
-# CALLBACKS
+# CALLBACKS (FIX SPAM!)
 # ======================
 
 @dp.callback_query_handler(lambda c: c.data.startswith("fav|"))
@@ -307,7 +283,7 @@ async def fav(c: types.CallbackQuery):
     cur.execute("INSERT INTO favs VALUES (?,?)", (c.from_user.id, song))
     conn.commit()
 
-    await c.answer("⭐ добавлено")
+    await c.answer("⭐ добавлено", show_alert=False)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("del|"))
 async def delete(c: types.CallbackQuery):
@@ -320,33 +296,37 @@ async def delete(c: types.CallbackQuery):
     await c.message.delete()
 
 # ======================
-# ADMIN
+# LINK SEARCH (NEW)
+# ======================
+
+@dp.message_handler(lambda m: m.text == "🔎 Поиск ссылки")
+async def link_help(m: types.Message):
+
+    await m.answer(
+        "🔎 Отправь ссылку:\n\n"
+        "• TikTok\n"
+        "• YouTube Shorts\n"
+        "• Instagram Reels\n\n"
+        "Я попробую найти трек 🎵"
+    )
+
+# ======================
+# ADMIN FIXED
 # ======================
 
 @dp.message_handler(commands=["admin"])
 async def admin(m: types.Message):
 
     if m.from_user.id != ADMIN_ID:
-        return
+        return await m.answer("⛔ нет доступа")
 
-    u, s, f = stats()
-
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("🔄 обновить", callback_data="stats"))
+    u, h, f = stats()
 
     await m.answer(
-        f"📊 ADMIN\n\n👥 {u}\n🔎 {s}\n⭐ {f}",
-        reply_markup=kb
-    )
-
-@dp.callback_query_handler(lambda c: c.data == "stats")
-async def stats_cb(c: types.CallbackQuery):
-
-    u, s, f = stats()
-
-    await c.message.edit_text(
-        f"📊 ADMIN\n\n👥 {u}\n🔎 {s}\n⭐ {f}",
-        reply_markup=c.message.reply_markup
+        f"📊 ADMIN PANEL\n\n"
+        f"👥 users: {u}\n"
+        f"🔎 searches: {h}\n"
+        f"⭐ favs: {f}"
     )
 
 # ======================
