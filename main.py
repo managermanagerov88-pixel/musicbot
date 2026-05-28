@@ -749,3 +749,10 @@ async def text_handler(message: types.Message):
 
 await message.answer("ADMIN WORKS")
 print("ADMIN HIT")
+
+if __name__ == "__main__":
+    
+    executor. start_polling(
+        dp,
+        skip_updates=True
+    )
