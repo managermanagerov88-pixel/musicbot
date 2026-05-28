@@ -222,6 +222,83 @@ def get_cover(artist, title):
 
     try:
 
+        query = f"{artist} {title}"
+
+        r = requests.get(
+            "https://itunes.apple.com/search",
+            params={
+                "term": query,
+                "entity": "song",
+                "limit": 15
+            },
+            timeout=15
+        ).json()
+
+        results = r.get("results")
+
+        if not results:
+            return None
+
+        best_cover = None
+        best_score = 0
+
+        artist_lower = artist.lower()
+        title_lower = title.lower()
+
+        for item in results:
+
+            item_artist = item.get(
+                "artistName",
+                ""
+            ).lower()
+
+            item_title = item.get(
+                "trackName",
+                ""
+            ).lower()
+
+            score = 0
+
+            # совпадение артиста
+            if artist_lower in item_artist:
+                score += 5
+
+            # совпадение названия
+            if title_lower in item_title:
+                score += 5
+
+            # точное совпадение
+            if artist_lower == item_artist:
+                score += 10
+
+            if title_lower == item_title:
+                score += 10
+
+            if score > best_score:
+
+                best_score = score
+
+                best_cover = item.get(
+                    "artworkUrl100"
+                )
+
+        if best_cover:
+
+            return best_cover.replace(
+                "100x100",
+                "1200x1200"
+            )
+
+        return None
+
+    except Exception as e:
+
+        print(e)
+
+        return None
+
+    try:
+
         r = requests.get(
             "https://itunes.apple.com/search",
             params={
