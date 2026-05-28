@@ -687,50 +687,46 @@ async def text_handler(message: types.Message):
         best_score = -1
 
         query_lower = message.text.lower()
+        query_words = set(query_lower.split())
 
         for item in results:
 
-    artist_raw = item.get("artistName", "")
-    title_raw = item.get("trackName", "")
+            artist_raw = item.get("artistName", "")
+            title_raw = item.get("trackName", "")
 
-    artist = artist_raw.lower()
-    title = title_raw.lower()
+            artist = artist_raw.lower()
+            title = title_raw.lower()
 
-    score = 0
+            title_words = set(title.split())
+            artist_words = set(artist.split())
 
-    query_words = set(query_lower.split())
-    title_words = set(title.split())
-    artist_words = set(artist.split())
+            score = 0
 
-    # 1. точное совпадение всей строки
-    if query_lower == title:
-        score += 200
+            # точное совпадение
+            if query_lower == title:
+                score += 200
 
-    # 2. частичное совпадение фраз
-    if query_lower in title:
-        score += 120
+            # частичное совпадение
+            if query_lower in title:
+                score += 120
 
-    # 3. совпадение слов (главное улучшение)
-    common_title = query_words & title_words
-    common_artist = query_words & artist_words
+            # совпадение слов
+            score += len(query_words & title_words) * 25
+            score += len(query_words & artist_words) * 15
 
-    score += len(common_title) * 25
-    score += len(common_artist) * 15
+            # артист в запросе
+            if artist in query_lower:
+                score += 60
 
-    # 4. бонус если артист совпадает сильно
-    if artist in query_lower:
-        score += 60
+            # фильтр мусора
+            bad_words = ["remix", "sped up", "slowed", "nightcore", "cover", "live"]
 
-    # 5. штраф за слишком “шумные” названия
-    bad_words = ["remix", "sped up", "slowed", "nightcore", "cover", "live"]
+            if any(b in title for b in bad_words):
+                score -= 40
 
-    if any(b in title for b in bad_words):
-        score -= 40
-
-    # выбор лучшего
-    if score > best_score:
-        best_score = score
-        best = item
+            if score > best_score:
+                best_score = score
+                best = item
 
         if not best:
             await wait.edit_text("❌ Трек не найден")
