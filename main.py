@@ -656,14 +656,10 @@ async def video_handler(message: types.Message):
 
 @dp.message_handler(content_types=["text"])
 async def text_handler(message: types.Message):
-    @dp.message_handler(content_types=["text"])
-async def text_handler(message: types.Message):
 
-    # ❌ игнорируем команды
     if message.text.startswith("/"):
         return
 
-    # ❌ игнорируем кнопку инструкции
     if message.text == "📖 Инструкция":
         return
 
