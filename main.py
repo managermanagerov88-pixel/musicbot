@@ -22,7 +22,7 @@ bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher(bot)
 
 # =====================
-# DB (ONLY USERS + STATS)
+# DB
 # =====================
 
 conn = sqlite3.connect("bot.db", check_same_thread=False)
@@ -46,17 +46,10 @@ time TEXT
 conn.commit()
 
 # =====================
-# STATE (SIMPLE AND STABLE)
-# =====================
-
-search_mode = set()
-
-# =====================
 # UI
 # =====================
 
 menu = ReplyKeyboardMarkup(resize_keyboard=True)
-menu.row("🔎 Поиск")
 menu.row("ℹ️ Помощь")
 
 sub_kb = InlineKeyboardMarkup()
@@ -76,14 +69,8 @@ async def is_sub(user_id):
     except:
         return False
 
-async def guard(m):
-    if not await is_sub(m.from_user.id):
-        await m.answer("🚫 подпишись на канал", reply_markup=sub_kb)
-        return False
-    return True
-
 # =====================
-# HELPERS
+# AUDIO IDENTIFY
 # =====================
 
 def audd(url):
@@ -97,6 +84,9 @@ def audd(url):
     except:
         return None
 
+# =====================
+# LYRICS (optional fallback)
+# =====================
 
 def lyrics(text):
     try:
@@ -109,24 +99,31 @@ def lyrics(text):
     except:
         return None
 
+# =====================
+# COVER (FIXED - STABLE)
+# =====================
 
 def cover(artist, title):
     try:
         r = requests.get(
             "https://itunes.apple.com/search",
-            params={"term": f"{artist} {title}", "limit": 1}
+            params={"term": f"{artist} {title}", "limit": 10}
         ).json()
 
-        if r.get("resultCount", 0) > 0:
-            item = r["results"][0]
+        if r.get("resultCount", 0) == 0:
+            return None
 
-            if artist.lower() in item["artistName"].lower():
+        for item in r["results"]:
+            if "artworkUrl100" in item:
                 return item["artworkUrl100"].replace("100x100", "600x600")
 
         return None
     except:
         return None
 
+# =====================
+# LINKS (ALWAYS FULL)
+# =====================
 
 def links(a, t):
     q = f"{a} {t}"
@@ -148,34 +145,15 @@ async def start(m: types.Message):
                 (m.from_user.id, str(datetime.now())))
     conn.commit()
 
-    if not await is_sub(m.from_user.id):
-        return await m.answer("🚫 подпишись на канал", reply_markup=sub_kb)
-
     await m.answer(
         "🎧 SPACE SEARCH\n\n"
-        "🔎 нажми Поиск → отправь голос / видео / текст",
-        reply_markup=menu
-    )
-
-# =====================
-# SEARCH MODE
-# =====================
-
-@dp.message_handler(lambda m: m.text == "🔎 Поиск")
-async def search(m: types.Message):
-
-    if not await guard(m):
-        return
-
-    search_mode.add(m.from_user.id)
-
-    await m.answer(
-        "📩 режим поиска включён\n\n"
-        "Отправь:\n"
-        "• голосовое\n"
+        "📌 Отправь:\n"
+        "• голос\n"
+        "• кружок\n"
         "• видео\n"
         "• текст\n\n"
-        "Я найду трек автоматически"
+        "И я найду трек автоматически 🔎",
+        reply_markup=menu
     )
 
 # =====================
@@ -186,32 +164,60 @@ async def search(m: types.Message):
 async def help(m: types.Message):
 
     await m.answer(
-        "ℹ️ инструкция:\n\n"
-        "1. нажми Поиск\n"
-        "2. отправь контент\n"
-        "3. получи трек + ссылки\n\n"
-        "поддержка: голос / видео / текст"
+        "ℹ️ Как пользоваться:\n\n"
+        "1. просто отправь голос / кружок / видео / текст\n"
+        "2. бот сам распознаёт музыку\n"
+        "3. получишь ссылки + обложку\n\n"
+        "💡 можно отправлять подряд без кнопок"
     )
 
 # =====================
-# MEDIA SEARCH (VOICE / VIDEO / AUDIO)
+# MAIN SEARCH (NO BUTTON MODE ANYMORE)
 # =====================
 
-@dp.message_handler(content_types=["voice", "video", "audio"])
-async def media(m: types.Message):
+@dp.message_handler(content_types=["voice", "video", "audio", "video_note", "text"])
+async def handler(m: types.Message):
 
-    if m.from_user.id not in search_mode:
+    # ignore commands
+    if m.text and m.text.startswith("/"):
         return
 
-    search_mode.discard(m.from_user.id)
+    await process(m)
 
-    msg = await m.answer("🔎 ищу...")
+# =====================
+# CORE PROCESS
+# =====================
 
-    file_id = (
-        m.voice.file_id if m.voice else
-        m.video.file_id if m.video else
-        m.audio.file_id
-    )
+async def process(m: types.Message):
+
+    msg = await m.answer("🔎 ищу трек...")
+
+    file_id = None
+
+    if m.voice:
+        file_id = m.voice.file_id
+    elif m.video:
+        file_id = m.video.file_id
+    elif m.audio:
+        file_id = m.audio.file_id
+    elif m.video_note:
+        file_id = m.video_note.file_id
+    elif m.text:
+        # text search fallback
+        res = lyrics(m.text)
+        if not res or not res.get("result"):
+            return await msg.edit_text("❌ не найдено")
+
+        item = res["result"][0]
+        a = item.get("artist", "Unknown")
+        t = item.get("title", m.text)
+
+        await send_result(m, msg, a, t)
+        return
+
+    # audio/video recognition
+    if not file_id:
+        return await msg.edit_text("❌ не найдено")
 
     file = await bot.get_file(file_id)
     url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
@@ -221,14 +227,24 @@ async def media(m: types.Message):
     if not res or not res.get("result"):
         return await msg.edit_text("❌ не найдено")
 
-    a = res["result"]["artist"]
-    t = res["result"]["title"]
+    item = res["result"]
 
-    song = f"{a} - {t}"
+    a = item.get("artist", "Unknown")
+    t = item.get("title", "Unknown")
+
+    await send_result(m, msg, a, t)
+
+# =====================
+# SEND RESULT
+# =====================
+
+async def send_result(m, msg, a, t):
 
     cur.execute("INSERT INTO stats VALUES (?,?,?)",
-                (m.from_user.id, "media", str(datetime.now())))
+                (m.from_user.id, "search", str(datetime.now())))
     conn.commit()
+
+    song = f"{a} - {t}"
 
     img = cover(a, t)
     l = links(a, t)
@@ -251,50 +267,7 @@ async def media(m: types.Message):
         await msg.edit_text(text, reply_markup=kb)
 
 # =====================
-# TEXT SEARCH
-# =====================
-
-@dp.message_handler()
-async def text(m: types.Message):
-
-    if m.text.startswith("/"):
-        return
-
-    if m.from_user.id not in search_mode:
-        return
-
-    search_mode.discard(m.from_user.id)
-
-    msg = await m.answer("🔎 ищу...")
-
-    r = lyrics(m.text)
-
-    if not r or not r.get("result"):
-        return await msg.edit_text("❌ не найдено")
-
-    a = r["result"][0]["artist"]
-    t = r["result"][0]["title"]
-
-    song = f"{a} - {t}"
-
-    img = cover(a, t)
-    l = links(a, t)
-
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("▶ YouTube", url=l["yt"]),
-        InlineKeyboardButton("🎧 Spotify", url=l["sp"])
-    )
-
-    text = f"🎵 {song}"
-
-    if img:
-        await bot.send_photo(m.chat.id, img, caption=text, reply_markup=kb)
-    else:
-        await msg.edit_text(text, reply_markup=kb)
-
-# =====================
-# ADMIN PANEL (STABLE)
+# ADMIN PANEL
 # =====================
 
 @dp.message_handler(commands=["admin"])
@@ -307,12 +280,12 @@ async def admin(m: types.Message):
     users = cur.fetchone()[0]
 
     cur.execute("SELECT COUNT(*) FROM stats")
-    stats = cur.fetchone()[0]
+    searches = cur.fetchone()[0]
 
     await m.answer(
         f"🛠 ADMIN PANEL\n\n"
         f"👤 users: {users}\n"
-        f"🔎 searches: {stats}"
+        f"🔎 searches: {searches}"
     )
 
 # =====================
