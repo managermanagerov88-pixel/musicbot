@@ -36,6 +36,12 @@ cur.execute("CREATE TABLE IF NOT EXISTS favs (user_id INTEGER, song TEXT)")
 conn.commit()
 
 # =========================
+# USER STATES (ВАЖНО FIX)
+# =========================
+
+user_state = {}  # text_search mode
+
+# =========================
 # UI
 # =========================
 
@@ -49,7 +55,7 @@ sub_kb.add(InlineKeyboardButton("📢 Подписаться", url=f"https://t.m
 sub_kb.add(InlineKeyboardButton("🔄 Проверить", callback_data="check_sub"))
 
 # =========================
-# SUB CHECK (ВАЖНО)
+# SUB CHECK (FIXED)
 # =========================
 
 async def is_sub(user_id: int):
@@ -61,7 +67,7 @@ async def is_sub(user_id: int):
 
 async def guard(user_id, message):
     if not await is_sub(user_id):
-        await message.answer("🚫 Подпишись на канал для доступа", reply_markup=sub_kb)
+        await message.answer("🚫 Доступ только после подписки", reply_markup=sub_kb)
         return False
     return True
 
@@ -80,11 +86,11 @@ def recognize(url):
     except:
         return None
 
-def cover(artist, title):
+def cover(a, t):
     try:
         r = requests.get(
             "https://itunes.apple.com/search",
-            params={"term": f"{artist} {title}", "limit": 1}
+            params={"term": f"{a} {t}", "limit": 1}
         ).json()
 
         if r.get("resultCount"):
@@ -92,13 +98,13 @@ def cover(artist, title):
     except:
         return None
 
-def links(artist, title):
-    q = f"{artist} {title}"
+def links(a, t):
+    q = f"{a} {t}"
     return {
-        "yt": f"https://www.youtube.com/results?search_query={q}",
+        "yt": f"https://youtube.com/results?search_query={q}",
         "sp": f"https://open.spotify.com/search/{q}",
         "ya": f"https://music.yandex.ru/search?text={q}",
-        "genius": f"https://genius.com/search?q={q}"
+        "gn": f"https://genius.com/search?q={q}"
     }
 
 # =========================
@@ -109,25 +115,38 @@ def links(artist, title):
 async def start(m: types.Message):
 
     if not await is_sub(m.from_user.id):
-        return await m.answer("🚫 Доступ только после подписки", reply_markup=sub_kb)
+        return await m.answer("🚫 Подпишись", reply_markup=sub_kb)
 
-    await m.answer("🎵 Music Finder\nВыбери действие:", reply_markup=menu)
+    await m.answer("🎵 Music Bot готов", reply_markup=menu)
 
 # =========================
-# CHECK SUB BUTTON
+# CHECK SUB
 # =========================
 
 @dp.callback_query_handler(lambda c: c.data == "check_sub")
 async def check(c: types.CallbackQuery):
 
     if await is_sub(c.from_user.id):
-        await c.message.edit_text("✅ Доступ открыт")
-        await bot.send_message(c.from_user.id, "🎵 Меню:", reply_markup=menu)
+        await c.message.edit_text("✅ доступ открыт")
+        await bot.send_message(c.from_user.id, "🎵 меню", reply_markup=menu)
     else:
-        await c.answer("❌ Ты не подписан", show_alert=True)
+        await c.answer("❌ не подписан", show_alert=True)
 
 # =========================
-# AUDIO / VOICE / VIDEO NOTE
+# BUTTONS (FIX — no confusion anymore)
+# =========================
+
+@dp.message_handler(lambda m: m.text == "🔎 Поиск текста")
+async def enable_search(m: types.Message):
+
+    if not await guard(m.from_user.id, m):
+        return
+
+    user_state[m.from_user.id] = "text_search"
+    await m.answer("✏️ Введите текст песни")
+
+# =========================
+# MEDIA
 # =========================
 
 @dp.message_handler(content_types=["voice", "audio", "video_note"])
@@ -136,7 +155,7 @@ async def media(m: types.Message):
     if not await guard(m.from_user.id, m):
         return
 
-    wait = await m.answer("🎧 ищу трек...")
+    msg = await m.answer("🎧 ищу...")
 
     file_id = m.voice.file_id if m.voice else m.audio.file_id if m.audio else m.video_note.file_id
 
@@ -146,18 +165,18 @@ async def media(m: types.Message):
     res = recognize(url)
 
     if not res or not res.get("result"):
-        return await wait.edit_text("❌ не найдено")
+        return await msg.edit_text("❌ не найдено")
 
-    artist = res["result"]["artist"]
-    title = res["result"]["title"]
+    a = res["result"]["artist"]
+    t = res["result"]["title"]
 
-    song = f"{artist} - {title}"
+    song = f"{a} - {t}"
 
     cur.execute("INSERT INTO history VALUES (?,?)", (m.from_user.id, song))
     conn.commit()
 
-    img = cover(artist, title)
-    l = links(artist, title)
+    img = cover(a, t)
+    l = links(a, t)
 
     kb = InlineKeyboardMarkup()
     kb.add(
@@ -166,21 +185,16 @@ async def media(m: types.Message):
     )
     kb.add(
         InlineKeyboardButton("🎵 Yandex", url=l["ya"]),
-        InlineKeyboardButton("📜 Genius", url=l["genius"])
+        InlineKeyboardButton("📜 Genius", url=l["gn"])
     )
-    kb.add(
-        InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}")
-    )
-
-    text = f"🎵 {song}"
 
     if img:
-        await bot.send_photo(m.chat.id, img, caption=text, reply_markup=kb)
+        await bot.send_photo(m.chat.id, img, caption=song, reply_markup=kb)
     else:
-        await wait.edit_text(text, reply_markup=kb)
+        await msg.edit_text(song, reply_markup=kb)
 
 # =========================
-# TEXT SEARCH
+# TEXT SEARCH (ONLY WHEN MODE ON)
 # =========================
 
 @dp.message_handler()
@@ -189,10 +203,16 @@ async def text(m: types.Message):
     if m.text.startswith("/"):
         return
 
+    # ❗ FIX: ONLY SEARCH WHEN USER IS IN SEARCH MODE
+    if user_state.get(m.from_user.id) != "text_search":
+        return
+
     if not await guard(m.from_user.id, m):
         return
 
-    wait = await m.answer("🔎 ищу...")
+    user_state[m.from_user.id] = None  # reset mode
+
+    msg = await m.answer("🔎 ищу...")
 
     r = requests.get(
         "https://api.audd.io/findLyrics/",
@@ -201,85 +221,29 @@ async def text(m: types.Message):
     ).json()
 
     if not r.get("result"):
-        return await wait.edit_text("❌ не найдено")
+        return await msg.edit_text("❌ не найдено")
 
-    artist = r["result"][0]["artist"]
-    title = r["result"][0]["title"]
+    a = r["result"][0]["artist"]
+    t = r["result"][0]["title"]
 
-    song = f"{artist} - {title}"
+    song = f"{a} - {t}"
 
     cur.execute("INSERT INTO history VALUES (?,?)", (m.from_user.id, song))
     conn.commit()
 
-    img = cover(artist, title)
-    l = links(artist, title)
+    img = cover(a, t)
+    l = links(a, t)
 
     kb = InlineKeyboardMarkup()
     kb.add(
         InlineKeyboardButton("▶️ YouTube", url=l["yt"]),
         InlineKeyboardButton("🎧 Spotify", url=l["sp"])
     )
-    kb.add(
-        InlineKeyboardButton("🎵 Yandex", url=l["ya"]),
-        InlineKeyboardButton("📜 Genius", url=l["genius"])
-    )
-    kb.add(
-        InlineKeyboardButton("⭐ В избранное", callback_data=f"fav|{song}")
-    )
-
-    text_out = f"🎵 {song}"
 
     if img:
-        await bot.send_photo(m.chat.id, img, caption=text_out, reply_markup=kb)
+        await bot.send_photo(m.chat.id, img, caption=song, reply_markup=kb)
     else:
-        await wait.edit_text(text_out, reply_markup=kb)
-
-# =========================
-# FAVORITES ADD / REMOVE
-# =========================
-
-@dp.callback_query_handler(lambda c: c.data.startswith("fav|"))
-async def fav(c: types.CallbackQuery):
-
-    song = c.data.split("|", 1)[1]
-
-    cur.execute("INSERT INTO favs VALUES (?,?)", (c.from_user.id, song))
-    conn.commit()
-
-    await c.answer("⭐ Добавлено")
-
-# =========================
-# FAVORITES LIST + REMOVE
-# =========================
-
-@dp.message_handler(lambda m: m.text == "⭐ Избранное")
-async def fav_list(m: types.Message):
-
-    cur.execute("SELECT rowid, song FROM favs WHERE user_id=?", (m.from_user.id,))
-    rows = cur.fetchall()
-
-    if not rows:
-        return await m.answer("⭐ пусто")
-
-    text = "⭐ Избранное:\n\n"
-    kb = InlineKeyboardMarkup()
-
-    for r in rows[-10:]:
-        text += f"• {r[1]}\n"
-        kb.add(InlineKeyboardButton(f"❌ удалить {r[1][:15]}", callback_data=f"del|{r[0]}"))
-
-    await m.answer(text, reply_markup=kb)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("del|"))
-async def delete_fav(c: types.CallbackQuery):
-
-    fav_id = c.data.split("|")[1]
-
-    cur.execute("DELETE FROM favs WHERE rowid=?", (fav_id,))
-    conn.commit()
-
-    await c.answer("🗑 удалено")
-    await c.message.delete()
+        await msg.edit_text(song, reply_markup=kb)
 
 # =========================
 # HISTORY
@@ -294,6 +258,18 @@ async def history(m: types.Message):
     await m.answer("\n".join([r[0] for r in rows[-10:]]) if rows else "пусто")
 
 # =========================
+# FAVORITES
+# =========================
+
+@dp.message_handler(lambda m: m.text == "⭐ Избранное")
+async def favs(m: types.Message):
+
+    cur.execute("SELECT song FROM favs WHERE user_id=?", (m.from_user.id,))
+    rows = cur.fetchall()
+
+    await m.answer("\n".join([r[0] for r in rows[-10:]]) if rows else "пусто")
+
+# =========================
 # HELP
 # =========================
 
@@ -301,10 +277,9 @@ async def history(m: types.Message):
 async def help(m: types.Message):
     await m.answer(
         "🎵 Бот:\n"
-        "🎧 голос/аудио → трек\n"
+        "🎧 голос → трек\n"
         "📹 видео → трек\n"
-        "🔎 текст → поиск\n"
-        "⭐ избранное\n📜 история"
+        "✏️ текст → поиск\n"
     )
 
 # =========================
