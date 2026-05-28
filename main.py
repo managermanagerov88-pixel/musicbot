@@ -748,58 +748,10 @@ async def text_handler(message: types.Message):
 
 @dp.message_handler(commands=["admin"])
 async def admin_handler(message: types.Message):
-    print("ADMIN HIT")
-    print("ADMIN COMMAND TRIGGERED")
 
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ Нет доступа")
-        return
+    print("ADMIN CALLED")
 
-    try:
-
-        cursor.execute("SELECT COUNT(*) FROM users")
-        users = cursor.fetchone()[0]
-
-        cursor.execute("SELECT COUNT(*) FROM searches")
-        searches = cursor.fetchone()[0]
-
-        today = datetime.now().strftime("%Y-%m-%d")
-
-        cursor.execute(
-            "SELECT COUNT(*) FROM searches WHERE time LIKE ?",
-            (f"{today}%",)
-        )
-
-        today_searches = cursor.fetchone()[0]
-
-        cursor.execute("""
-            SELECT search_type, COUNT(*)
-            FROM searches
-            GROUP BY search_type
-        """)
-
-        stats = cursor.fetchall()
-
-        stat_text = "\n".join(
-            f"{i[0]}: {i[1]}" for i in stats
-        )
-
-        text = f"""
-🛠 ADMIN PANEL
-
-👤 Users: {users}
-🔎 Searches: {searches}
-📅 Today: {today_searches}
-
-📊 Types:
-{stat_text}
-"""
-
-        await message.answer(text)
-
-    except Exception as e:
-        print("ADMIN ERROR:", e)
-        await message.answer("❌ Ошибка админ панели")
+    await message.answer("ADMIN WORKS")
 
 if __name__ == "__main__":
 
