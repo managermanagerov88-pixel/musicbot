@@ -222,33 +222,94 @@ def get_cover(artist, title):
 
     try:
 
-        import re
-
         query = f"{artist} {title}"
 
-        headers = {
-            "User-Agent": "Mozilla/5.0"
-        }
-
         r = requests.get(
-            "https://open.spotify.com/search",
+            "https://itunes.apple.com/search",
             params={
-                "q": query,
-                "type": "track"
+                "term": query,
+                "entity": "song",
+                "limit": 10
             },
-            headers=headers,
             timeout=15
-        )
+        ).json()
 
-        html = r.text
+        results = r.get("results")
 
-        images = re.findall(
-            r'https://i\.scdn\.co/image/[a-zA-Z0-9]+',
-            html
-        )
+        if not results:
+            return None
 
-        if images:
-            return images[0]
+        artist_lower = artist.lower()
+        title_lower = title.lower()
+
+        best_score = -1
+        best_cover = None
+
+        for item in results:
+
+            item_artist = item.get(
+                "artistName",
+                ""
+            ).lower()
+
+            item_title = item.get(
+                "trackName",
+                ""
+            ).lower()
+
+            score = 0
+
+            # точный артист
+            if artist_lower == item_artist:
+                score += 100
+
+            elif artist_lower in item_artist:
+                score += 50
+
+            # точное название
+            if title_lower == item_title:
+                score += 100
+
+            elif title_lower in item_title:
+                score += 50
+
+            # фильтр мусора
+
+            banned = [
+                "remix",
+                "live",
+                "karaoke",
+                "instrumental",
+                "slowed",
+                "speed up",
+                "nightcore"
+            ]
+
+            bad = False
+
+            for b in banned:
+
+                if b in item_title:
+                    bad = True
+                    break
+
+            if bad:
+                continue
+
+            if score > best_score:
+
+                best_score = score
+
+                best_cover = item.get(
+                    "artworkUrl100"
+                )
+
+        if best_cover:
+
+            return best_cover.replace(
+                "100x100",
+                "1200x1200"
+            )
 
         return None
 
