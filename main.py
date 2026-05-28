@@ -222,72 +222,33 @@ def get_cover(artist, title):
 
     try:
 
+        import re
+
         query = f"{artist} {title}"
 
+        headers = {
+            "User-Agent": "Mozilla/5.0"
+        }
+
         r = requests.get(
-            "https://itunes.apple.com/search",
+            "https://open.spotify.com/search",
             params={
-                "term": query,
-                "entity": "song",
-                "limit": 15
+                "q": query,
+                "type": "track"
             },
+            headers=headers,
             timeout=15
-        ).json()
+        )
 
-        results = r.get("results")
+        html = r.text
 
-        if not results:
-            return None
+        images = re.findall(
+            r'https://i\.scdn\.co/image/[a-zA-Z0-9]+',
+            html
+        )
 
-        best_cover = None
-        best_score = 0
-
-        artist_lower = artist.lower()
-        title_lower = title.lower()
-
-        for item in results:
-
-            item_artist = item.get(
-                "artistName",
-                ""
-            ).lower()
-
-            item_title = item.get(
-                "trackName",
-                ""
-            ).lower()
-
-            score = 0
-
-            # совпадение артиста
-            if artist_lower in item_artist:
-                score += 5
-
-            # совпадение названия
-            if title_lower in item_title:
-                score += 5
-
-            # точное совпадение
-            if artist_lower == item_artist:
-                score += 10
-
-            if title_lower == item_title:
-                score += 10
-
-            if score > best_score:
-
-                best_score = score
-
-                best_cover = item.get(
-                    "artworkUrl100"
-                )
-
-        if best_cover:
-
-            return best_cover.replace(
-                "100x100",
-                "1200x1200"
-            )
+        if images:
+            return images[0]
 
         return None
 
