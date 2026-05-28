@@ -667,73 +667,50 @@ async def text_handler(message: types.Message):
 
     try:
 
+        # =================================================
+        # 1. ПОИСК ПО ТЕКСТУ ПЕСНИ
+        # =================================================
+
         r = requests.get(
-            "https://itunes.apple.com/search",
-            params={
-                "term": message.text,
-                "entity": "song",
-                "limit": 10
-            },
+            "https://api.lyrics.ovh/suggest/" + message.text,
             timeout=15
         ).json()
 
-        results = r.get("results", [])
+        data = r.get("data")
 
-        if not results:
-            await wait.edit_text("❌ Трек не найден")
-            return
+        # =================================================
+        # 2. ЕСЛИ lyrics.ovh НЕ НАШЕЛ -> fallback iTunes
+        # =================================================
 
-        best = None
-        best_score = -1
+        if not data:
 
-        query_lower = message.text.lower()
-        query_words = set(query_lower.split())
+            r = requests.get(
+                "https://itunes.apple.com/search",
+                params={
+                    "term": message.text,
+                    "entity": "song",
+                    "limit": 5
+                },
+                timeout=15
+            ).json()
 
-        for item in results:
+            results = r.get("results", [])
 
-            artist_raw = item.get("artistName", "")
-            title_raw = item.get("trackName", "")
+            if not results:
+                await wait.edit_text("❌ Трек не найден")
+                return
 
-            artist = artist_raw.lower()
-            title = title_raw.lower()
+            best = results[0]
 
-            title_words = set(title.split())
-            artist_words = set(artist.split())
+            artist = best.get("artistName", "Unknown")
+            title = best.get("trackName", "Unknown")
 
-            score = 0
+        else:
 
-            # точное совпадение
-            if query_lower == title:
-                score += 200
+            first = data[0]
 
-            # частичное совпадение
-            if query_lower in title:
-                score += 120
-
-            # совпадение слов
-            score += len(query_words & title_words) * 25
-            score += len(query_words & artist_words) * 15
-
-            # артист в запросе
-            if artist in query_lower:
-                score += 60
-
-            # фильтр мусора
-            bad_words = ["remix", "sped up", "slowed", "nightcore", "cover", "live"]
-
-            if any(b in title for b in bad_words):
-                score -= 40
-
-            if score > best_score:
-                best_score = score
-                best = item
-
-        if not best:
-            await wait.edit_text("❌ Трек не найден")
-            return
-
-        artist = best.get("artistName", "Unknown")
-        title = best.get("trackName", "Unknown")
+            artist = first["artist"]["name"]
+            title = first["title"]
 
         await wait.delete()
 
@@ -745,7 +722,9 @@ async def text_handler(message: types.Message):
         )
 
     except Exception as e:
+
         print("TEXT ERROR:", e)
+
         await wait.edit_text("❌ Ошибка поиска")
 # =====================================================
 # ADMIN
