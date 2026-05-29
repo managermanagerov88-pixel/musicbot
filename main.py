@@ -657,6 +657,9 @@ async def video_handler(message: types.Message):
 @dp.message_handler(content_types=["text"])
 async def text_handler(message: types.Message):
 
+    if message.text.startswith("/admin"):
+        return
+    
     if message.text.startswith("/"):
         return
 
