@@ -727,17 +727,91 @@ async def text_handler(message: types.Message):
 
         await wait.edit_text("❌ Ошибка поиска")
 # =====================================================
-# ADMIN
+# ADMIN PANEL
 # =====================================================
 
 @dp.message_handler(commands=["admin"])
 async def admin_handler(message: types.Message):
 
+    # доступ только админу
     if message.from_user.id != ADMIN_ID:
         return
 
-    await message.answer("ADMIN WORKS")
+    # всего пользователей
+    cursor.execute(
+        "SELECT COUNT(*) FROM users"
+    )
 
+    total_users = cursor.fetchone()[0]
+
+    # пользователей сегодня
+    today = str(datetime.now().date())
+
+    cursor.execute(
+        "SELECT COUNT(*) FROM users WHERE joined LIKE ?",
+        (f"{today}%",)
+    )
+
+    today_users = cursor.fetchone()[0]
+
+    # всего поисков
+    cursor.execute(
+        "SELECT COUNT(*) FROM searches"
+    )
+
+    total_searches = cursor.fetchone()[0]
+
+    # голосовые
+    cursor.execute(
+        "SELECT COUNT(*) FROM searches WHERE search_type='voice'"
+    )
+
+    voice_count = cursor.fetchone()[0]
+
+    # кружки
+    cursor.execute(
+        "SELECT COUNT(*) FROM searches WHERE search_type='circle'"
+    )
+
+    circle_count = cursor.fetchone()[0]
+
+    # видео
+    cursor.execute(
+        "SELECT COUNT(*) FROM searches WHERE search_type='video'"
+    )
+
+    video_count = cursor.fetchone()[0]
+
+    # текст
+    cursor.execute(
+        "SELECT COUNT(*) FROM searches WHERE search_type='text'"
+    )
+
+    text_count = cursor.fetchone()[0]
+
+    text = f"""
+📊 ADMIN PANEL
+
+━━━━━━━━━━━━━━
+
+👥 Пользователей: {total_users}
+📅 За сегодня: {today_users}
+
+━━━━━━━━━━━━━━
+
+🔎 Всего поисков: {total_searches}
+
+🎤 Голосовые: {voice_count}
+⭕ Кружки: {circle_count}
+🎥 Видео: {video_count}
+📝 Текст: {text_count}
+
+━━━━━━━━━━━━━━
+
+✅ Система работает
+"""
+
+    await message.answer(text)
 if __name__ == "__main__":
     
     executor.start_polling(
