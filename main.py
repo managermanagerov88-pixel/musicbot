@@ -63,7 +63,11 @@ conn.commit()
 menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
+admin_kb = InlineKeyboardMarkup()
 
+admin_kb.add(
+    InlineKeyboardButton("📊 Статистика", callback_data="stats")
+)
 menu.add(
     KeyboardButton("📖 Инструкция")
 )
@@ -201,6 +205,17 @@ async def help_handler(message: types.Message):
 """
 
     await message.answer(text)
+
+@dp.message_handler(commands=["admin"])
+async def admin_panel(message: types.Message):
+
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    await message.answer(
+        "⚙ Админ панель",
+        reply_markup=admin_kb
+    )
 
 # =====================================================
 # COVER
@@ -733,88 +748,23 @@ async def text_handler(message: types.Message):
 # ADMIN PANEL
 # =====================================================
 
-@dp.message_handler(commands=["admin"])
-async def admin_handler(message: types.Message):
+@dp.callback_query_handler(lambda c: c.data == "stats")
+async def stats_handler(call: types.CallbackQuery):
 
-    # доступ только админу
-    if message.from_user.id != ADMIN_ID:
+    if call.from_user.id != ADMIN_ID:
         return
 
-    # всего пользователей
-    cursor.execute(
-        "SELECT COUNT(*) FROM users"
+    cursor.execute("SELECT COUNT(*) FROM users")
+    users = cursor.fetchone()[0]
+
+    cursor.execute("SELECT COUNT(*) FROM searches")
+    searches = cursor.fetchone()[0]
+
+    await call.message.answer(
+        f"📊 СТАТИСТИКА\n\n"
+        f"👥 Пользователи: {users}\n"
+        f"🔎 Поиски: {searches}"
     )
-
-    total_users = cursor.fetchone()[0]
-
-    # пользователей сегодня
-    today = str(datetime.now().date())
-
-    cursor.execute(
-        "SELECT COUNT(*) FROM users WHERE joined LIKE ?",
-        (f"{today}%",)
-    )
-
-    today_users = cursor.fetchone()[0]
-
-    # всего поисков
-    cursor.execute(
-        "SELECT COUNT(*) FROM searches"
-    )
-
-    total_searches = cursor.fetchone()[0]
-
-    # голосовые
-    cursor.execute(
-        "SELECT COUNT(*) FROM searches WHERE search_type='voice'"
-    )
-
-    voice_count = cursor.fetchone()[0]
-
-    # кружки
-    cursor.execute(
-        "SELECT COUNT(*) FROM searches WHERE search_type='circle'"
-    )
-
-    circle_count = cursor.fetchone()[0]
-
-    # видео
-    cursor.execute(
-        "SELECT COUNT(*) FROM searches WHERE search_type='video'"
-    )
-
-    video_count = cursor.fetchone()[0]
-
-    # текст
-    cursor.execute(
-        "SELECT COUNT(*) FROM searches WHERE search_type='text'"
-    )
-
-    text_count = cursor.fetchone()[0]
-
-    text = f"""
-📊 ADMIN PANEL
-
-━━━━━━━━━━━━━━
-
-👥 Пользователей: {total_users}
-📅 За сегодня: {today_users}
-
-━━━━━━━━━━━━━━
-
-🔎 Всего поисков: {total_searches}
-
-🎤 Голосовые: {voice_count}
-⭕ Кружки: {circle_count}
-🎥 Видео: {video_count}
-📝 Текст: {text_count}
-
-━━━━━━━━━━━━━━
-
-✅ Система работает
-"""
-
-    await message.answer(text)
    
 if __name__ == "__main__":
     
