@@ -815,6 +815,10 @@ async def admin_handler(message: types.Message):
 """
 
     await message.answer(text)
+    @dp.message_handler(commands=["admin"])
+async def admin_test(message: types.Message):
+
+    await message.answer("ADMIN COMMAND WORKS")
 if __name__ == "__main__":
     
     executor.start_polling(
