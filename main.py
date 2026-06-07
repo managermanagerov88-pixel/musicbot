@@ -751,19 +751,9 @@ async def text_handler(message: types.Message):
 @dp.callback_query_handler(lambda c: c.data == "stats")
 async def stats_handler(call: types.CallbackQuery):
 
-    if call.from_user.id != ADMIN_ID:
-        return
+    await call.answer()
 
-    cursor.execute("SELECT COUNT(*) FROM users")
-    users = cursor.fetchone()[0]
-
-    cursor.execute("SELECT COUNT(*) FROM searches")
-    searches = cursor.fetchone()[0]
-
-    await call.message.answer(
-        f"📊 СТАТИСТИКА\n\n"
-        f"👥 Пользователи: {users}\n"
-        f"🔎 Поиски: {searches}"
+    await call.message.answer("КНОПКА РАБОТАЕТ")
     )
    
 if __name__ == "__main__":
