@@ -754,7 +754,6 @@ async def stats_handler(call: types.CallbackQuery):
     await call.answer()
 
     await call.message.answer("КНОПКА РАБОТАЕТ")
-    )
    
 if __name__ == "__main__":
     
